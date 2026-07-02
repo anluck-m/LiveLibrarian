@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>librarian - 近くの図書館で借りられる人気本ランキング</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>librarian</h1>
+    <p>カーリルAPI × 楽天ブックスAPI で、近くの図書館で借りられる人気本ランキングを表示します</p>
+  </header>
+
+  <main>
+    <section class="card" id="step1">
+      <h2>1. 地域を選んで図書館を探す</h2>
+      <div class="form-row">
+        <label for="pref">都道府県</label>
+        <select id="pref"></select>
+      </div>
+      <div class="form-row">
+        <label for="city">市区町村（任意）</label>
+        <input type="text" id="city" placeholder="例: 渋谷区">
+      </div>
+      <button id="searchLibrariesBtn">図書館を探す</button>
+      <p class="error" id="librariesError"></p>
+    </section>
+
+    <section class="card" id="step2" hidden>
+      <h2>2. 確認する図書館システムを選ぶ</h2>
+      <div id="systemList" class="system-list"></div>
+      <div class="form-row">
+        <label for="genre">ジャンル</label>
+        <select id="genre"></select>
+      </div>
+      <div class="form-row">
+        <label for="sort">並び順</label>
+        <select id="sort">
+          <option value="reviewCount">定番人気（レビュー数順・借りやすい）</option>
+          <option value="sales">売れ筋（販売数順・今の話題作）</option>
+        </select>
+      </div>
+      <button id="showRankingBtn">ランキングを表示</button>
+      <p class="error" id="rankingError"></p>
+    </section>
+
+    <section id="loading" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p>取得中です。図書館の蔵書確認には少し時間がかかります…</p>
+    </section>
+
+    <section id="step3">
+      <div id="filterBar" class="filter-bar" hidden>
+        <span class="filter-label">絞り込み:</span>
+        <button type="button" class="filter-btn active" data-filter="all">すべて</button>
+        <button type="button" class="filter-btn" data-filter="available">貸出可</button>
+        <button type="button" class="filter-btn" data-filter="onloan">貸出中</button>
+        <button type="button" class="filter-btn" data-filter="held">蔵書あり</button>
+        <span class="filter-count" id="filterCount"></span>
+      </div>
+      <div id="rankingList" class="ranking-list"></div>
+      <div id="pagination" class="pagination" hidden>
+        <button type="button" id="prevPageBtn">← 前のページ</button>
+        <span id="pageIndicator" class="page-indicator"></span>
+        <button type="button" id="nextPageBtn">次のページ →</button>
+      </div>
+      <div id="collectControls" class="pagination" hidden>
+        <button type="button" id="loadMoreBtn">もっと探す</button>
+        <span id="collectStatus" class="page-indicator"></span>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
