@@ -8,8 +8,11 @@
 </head>
 <body>
   <header>
-    <h1>librarian</h1>
-    <p>カーリルAPI × 楽天ブックスAPI で、近くの図書館で借りられる人気本ランキングを表示します</p>
+    <h1 class="brand">
+      <span class="brand-mark" aria-hidden="true">📚</span>
+      <span class="brand-name">librarian<span class="brand-sub">browser</span></span>
+    </h1>
+    <p class="tagline">近くの図書館で借りられる人気本ランキング</p>
   </header>
 
   <main>
@@ -37,8 +40,8 @@
       <div class="form-row">
         <label for="sort">並び順</label>
         <select id="sort">
-          <option value="reviewCount">定番人気（レビュー数順・借りやすい）</option>
-          <option value="sales">売れ筋（販売数順・今の話題作）</option>
+          <option value="reviewCount">定番人気（レビュー数順）</option>
+          <option value="sales">売れ筋（販売数順）</option>
         </select>
       </div>
       <button id="showRankingBtn">ランキングを表示</button>
