@@ -5,9 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>librarian - 近くの図書館で借りられる人気本ランキング</title>
 <link rel="stylesheet" href="css/style.css">
+<script>
+  // 描画前にテーマを確定して、ダーク選択時のちらつき（FOUC）を防ぐ。
+  // 保存がなければ属性を付けず、CSS側の prefers-color-scheme に追従させる。
+  (function () {
+    try {
+      var t = localStorage.getItem('librarian:theme');
+      if (t === 'dark' || t === 'light') {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body>
   <header>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="テーマを切り替え">🌙</button>
     <h1 class="brand">
       <span class="brand-mark" aria-hidden="true">📚</span>
       <span class="brand-name">librarian<span class="brand-sub">browser</span></span>

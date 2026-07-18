@@ -55,6 +55,12 @@ export async function fetchBookRanking({ genreId, page = 1, sort = 'reviewCount'
       itemUrl: Item.itemUrl,
       imageUrl: Item.largeImageUrl || Item.mediumImageUrl,
       salesDate: Item.salesDate,
+      // 詳細表示（あらすじ・出版社・レビュー）用。いずれも既存レスポンスに含まれるため追加リクエストは不要。
+      caption: Item.itemCaption || '',
+      publisherName: Item.publisherName || '',
+      reviewAverage: Item.reviewAverage || '',
+      reviewCount: Item.reviewCount || 0,
+      itemPrice: Item.itemPrice || 0,
     }))
     .filter((item) => item.isbn);
 

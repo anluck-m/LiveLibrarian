@@ -1,3 +1,136 @@
+/* =============================================================
+   デザイントークン（Phase B: テーマ基盤）
+   すべての色・余白・角丸・影・フォントをここに集約する。
+   Figma AI で確定したビジュアル（Phase C）は、原則この :root の
+   値を差し替えるだけで反映できるようにしている。
+   ============================================================= */
+:root {
+  /* 色（ライト） */
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;   /* カード内のネスト面（図書館リスト・あらすじ等） */
+  --text: #222222;
+  --text-sub: #5a6473;
+  --text-muted: #718096;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e0;
+
+  --primary: #2b6cb0;
+  --primary-hover: #2c5282;
+  --primary-soft: #ebf4ff; /* チップ/リンクの淡いホバー背景 */
+  --on-primary: #ffffff;
+
+  --brand-grad: linear-gradient(135deg, #2b6cb0 0%, #4c51bf 55%, #6b46c1 100%);
+  --brand-line: linear-gradient(90deg, #2b6cb0, #6b46c1);
+  --brand-shadow: rgba(43, 108, 176, 0.25);
+
+  --success-bg: #c6f6d5; --success-fg: #22543d;
+  --danger-bg: #fed7d7;  --danger-fg: #822727;
+  --neutral-bg: #e2e8f0; --neutral-fg: #4a5568;
+  --warn-bg: #feebc8;    --warn-fg: #7b341e;
+
+  --error: #c53030;
+  --rakuten: #bf0000;
+  --rakuten-hover: #990000;
+
+  /* 余白スケール */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* 角丸 */
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --radius-input: 6px;
+  --radius-pill: 999px;
+
+  /* 影 */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.08);
+
+  --font-sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+
+  color-scheme: light;
+}
+
+/* ダークトークン。
+   - 手動でダークを選んだとき（[data-theme="dark"]）
+   - OSがダークで、手動でライトを選んでいないとき（media query）
+   の両方で適用する。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #1a1d24;
+  --surface-2: #22262f;
+  --text: #e6e8eb;
+  --text-sub: #9aa4b2;
+  --text-muted: #8b95a3;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
+
+  --primary: #5b8dd6;
+  --primary-hover: #74a1e4;
+  --primary-soft: #1e2a3d;
+  --on-primary: #0f1115;
+
+  --brand-grad: linear-gradient(135deg, #6ba1e6 0%, #8f8ff0 55%, #b48ce6 100%);
+  --brand-line: linear-gradient(90deg, #6ba1e6, #b48ce6);
+  --brand-shadow: rgba(107, 161, 230, 0.25);
+
+  --success-bg: #14311f; --success-fg: #7ee2a8;
+  --danger-bg: #3a2020;  --danger-fg: #f0a0a0;
+  --neutral-bg: #2a2f3a; --neutral-fg: #9aa4b2;
+  --warn-bg: #3a2f1a;    --warn-fg: #e6b878;
+
+  --error: #f0a0a0;
+  --rakuten: #e04343;
+  --rakuten-hover: #f26161;
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --surface: #1a1d24;
+    --surface-2: #22262f;
+    --text: #e6e8eb;
+    --text-sub: #9aa4b2;
+    --text-muted: #8b95a3;
+    --border: #2a2f3a;
+    --border-strong: #3a4150;
+
+    --primary: #5b8dd6;
+    --primary-hover: #74a1e4;
+    --primary-soft: #1e2a3d;
+    --on-primary: #0f1115;
+
+    --brand-grad: linear-gradient(135deg, #6ba1e6 0%, #8f8ff0 55%, #b48ce6 100%);
+    --brand-line: linear-gradient(90deg, #6ba1e6, #b48ce6);
+    --brand-shadow: rgba(107, 161, 230, 0.25);
+
+    --success-bg: #14311f; --success-fg: #7ee2a8;
+    --danger-bg: #3a2020;  --danger-fg: #f0a0a0;
+    --neutral-bg: #2a2f3a; --neutral-fg: #9aa4b2;
+    --warn-bg: #3a2f1a;    --warn-fg: #e6b878;
+
+    --error: #f0a0a0;
+    --rakuten: #e04343;
+    --rakuten-hover: #f26161;
+
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* =============================================================
+   ベース
+   ============================================================= */
 * {
   box-sizing: border-box;
 }
@@ -9,14 +142,19 @@
 }
 
 body {
-  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-  background: #f4f4f5;
-  color: #222;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
   margin: 0;
-  padding: 0 1rem 3rem;
+  padding: 0 var(--space-4) var(--space-8);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* =============================================================
+   ヘッダー
+   ============================================================= */
 header {
+  position: relative;
   text-align: center;
   padding: 2.75rem 1rem 1.5rem;
 }
@@ -33,13 +171,13 @@ header {
 
 .brand-mark {
   font-size: 0.9em;
-  filter: drop-shadow(0 2px 3px rgba(43, 108, 176, 0.25));
+  filter: drop-shadow(0 2px 3px var(--brand-shadow));
   transform: rotate(-6deg);
 }
 
 .brand-name {
   font-weight: 800;
-  background: linear-gradient(135deg, #2b6cb0 0%, #4c51bf 55%, #6b46c1 100%);
+  background: var(--brand-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -52,13 +190,13 @@ header {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   vertical-align: middle;
-  -webkit-text-fill-color: #a0aec0;
-  color: #a0aec0;
+  -webkit-text-fill-color: var(--text-muted);
+  color: var(--text-muted);
 }
 
 .tagline {
   margin: 0.65rem 0 0;
-  color: #5a6473;
+  color: var(--text-sub);
   font-size: 0.95rem;
   letter-spacing: 0.02em;
 }
@@ -70,21 +208,54 @@ header {
   width: 46px;
   height: 3px;
   margin: 0 auto 0.7rem;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #2b6cb0, #6b46c1);
+  border-radius: var(--radius-pill);
+  background: var(--brand-line);
 }
 
+/* テーマ切替トグル */
+.theme-toggle {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  line-height: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-2);
+}
+
+/* =============================================================
+   レイアウト・カード
+   ============================================================= */
 main {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
 }
 
 .card {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
+}
+
+.card h2 {
+  margin-top: 0;
 }
 
 .form-row {
@@ -101,27 +272,35 @@ main {
 
 select, input[type="text"] {
   flex: 1;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-input);
+}
+
+select:focus, input[type="text"]:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-color: var(--primary);
 }
 
 button {
-  background: #2b6cb0;
-  color: #fff;
+  background: var(--primary);
+  color: var(--on-primary);
   border: none;
   padding: 0.6rem 1.2rem;
-  border-radius: 4px;
+  border-radius: var(--radius-btn);
   cursor: pointer;
   font-size: 1rem;
 }
 
 button:hover {
-  background: #2c5282;
+  background: var(--primary-hover);
 }
 
 .error {
-  color: #c53030;
+  color: var(--error);
   min-height: 1.2em;
 }
 
@@ -132,22 +311,33 @@ button:hover {
   margin-bottom: 1rem;
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid #eee;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   padding: 0.6rem;
-  border-radius: 4px;
+  border-radius: var(--radius-input);
 }
 
+.system-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+/* =============================================================
+   ローディング
+   ============================================================= */
 #loading {
   text-align: center;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .spinner {
   width: 40px;
   height: 40px;
   margin: 0.5rem auto 0.75rem;
-  border: 4px solid #e2e8f0;
-  border-top-color: #2b6cb0;
+  border: 4px solid var(--border);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: spinner-rotate 0.8s linear infinite;
 }
@@ -170,6 +360,9 @@ button:hover {
   }
 }
 
+/* =============================================================
+   フィルタバー
+   ============================================================= */
 .filter-bar {
   display: flex;
   align-items: center;
@@ -180,43 +373,46 @@ button:hover {
 
 .filter-label {
   font-size: 0.9rem;
-  color: #555;
+  color: var(--text-sub);
 }
 
 .filter-btn {
-  background: #fff;
-  color: #2b6cb0;
-  border: 1px solid #cbd5e0;
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px solid var(--border-strong);
   padding: 0.35rem 0.9rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.85rem;
 }
 
 .filter-btn:hover {
-  background: #ebf4ff;
+  background: var(--primary-soft);
 }
 
 .filter-btn.active {
-  background: #2b6cb0;
-  color: #fff;
-  border-color: #2b6cb0;
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
 }
 
 .filter-count {
   margin-left: auto;
   font-size: 0.8rem;
-  color: #718096;
+  color: var(--text-muted);
 }
 
 .empty {
   text-align: center;
-  color: #718096;
+  color: var(--text-muted);
   padding: 2rem 0;
 }
 
+/* =============================================================
+   ランキングリスト（広画面は2列グリッド）
+   ============================================================= */
 .ranking-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 1rem;
 }
 
@@ -230,87 +426,283 @@ button:hover {
 
 .page-indicator {
   font-size: 0.9rem;
-  color: #555;
+  color: var(--text-sub);
+}
+
+.pagination button {
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px solid var(--border-strong);
+}
+
+.pagination button:hover:not(:disabled) {
+  background: var(--primary-soft);
 }
 
 .pagination button:disabled {
-  background: #cbd5e0;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-color: var(--border);
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
+/* =============================================================
+   書籍カード
+   ============================================================= */
 .book-card {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
   padding: 1rem;
   display: flex;
   gap: 1rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-.book-card img {
-  width: 90px;
-  height: 130px;
-  object-fit: cover;
-  flex-shrink: 0;
-  background: #eee;
+.book-card:hover {
+  box-shadow: var(--shadow-card-hover);
 }
 
 .book-rank {
   font-weight: bold;
-  color: #2b6cb0;
+  color: var(--primary);
   font-size: 1.2rem;
   width: 2.2rem;
   flex-shrink: 0;
 }
 
+.book-cover {
+  width: 90px;
+  height: 130px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
 .book-info {
   flex: 1;
+  min-width: 0;
 }
 
 .book-info h3 {
   margin: 0 0 0.3rem;
   font-size: 1.05rem;
+  line-height: 1.4;
+}
+
+.book-info h3 a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.book-info h3 a:hover {
+  text-decoration: underline;
 }
 
 .book-info .author {
-  color: #555;
-  margin: 0 0 0.5rem;
+  color: var(--text-sub);
+  margin: 0 0 0.35rem;
   font-size: 0.9rem;
 }
 
-.availability-list {
+.book-meta {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.book-meta .stars {
+  color: #d69e2e;
+  letter-spacing: -0.05em;
+}
+
+:root[data-theme="dark"] .book-meta .stars {
+  color: #e6b878;
+}
+
+/* あらすじ（折りたたみ） */
+.book-desc {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+
+.book-desc > summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.8rem;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+}
+
+.book-desc > summary::-webkit-details-marker {
+  display: none;
+}
+
+.book-desc > summary::before {
+  content: "▸";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+}
+
+.book-desc[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.book-desc .desc-body {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-input);
+  color: var(--text-sub);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* =============================================================
+   貸出状況（システム別要約 → 館別詳細トグル）
+   ============================================================= */
+.availability {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.avail-system {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
   padding: 0.15rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.8rem;
 }
 
 .badge.available {
-  background: #c6f6d5;
-  color: #22543d;
+  background: var(--success-bg);
+  color: var(--success-fg);
 }
 
 .badge.unavailable {
-  background: #fed7d7;
-  color: #822727;
+  background: var(--danger-bg);
+  color: var(--danger-fg);
 }
 
 .badge.none {
-  background: #e2e8f0;
-  color: #4a5568;
+  background: var(--neutral-bg);
+  color: var(--neutral-fg);
 }
 
 .badge.checking {
-  background: #feebc8;
-  color: #7b341e;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
 }
 
+/* 館別の詳細 */
+.avail-detail > summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.75rem;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+}
+
+.avail-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.avail-detail > summary::before {
+  content: "▸";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+}
+
+.avail-detail[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.branch-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-input);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.branch-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.branch-name {
+  color: var(--text-sub);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-status {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.branch-status.available {
+  color: var(--success-fg);
+}
+
+.branch-status.unavailable {
+  color: var(--danger-fg);
+}
+
+:root[data-theme="dark"] .branch-status.available {
+  color: var(--success-fg);
+}
+
+.reserve-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-btn);
+  font-size: 0.78rem;
+  text-decoration: none;
+  background: var(--primary);
+  color: var(--on-primary);
+  width: fit-content;
+}
+
+.reserve-link:hover {
+  background: var(--primary-hover);
+}
+
+/* =============================================================
+   外部リンク
+   ============================================================= */
 .book-links {
   display: flex;
   flex-wrap: wrap;
@@ -321,27 +713,45 @@ button:hover {
 .book-link {
   display: inline-block;
   padding: 0.3rem 0.7rem;
-  border-radius: 4px;
+  border-radius: var(--radius-btn);
   font-size: 0.8rem;
   text-decoration: none;
   border: 1px solid transparent;
 }
 
 .book-link.rakuten {
-  background: #bf0000;
+  background: var(--rakuten);
   color: #fff;
 }
 
 .book-link.rakuten:hover {
-  background: #990000;
+  background: var(--rakuten-hover);
 }
 
 .book-link.calil {
-  background: #fff;
-  color: #2b6cb0;
-  border-color: #2b6cb0;
+  background: var(--surface);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .book-link.calil:hover {
-  background: #ebf4ff;
+  background: var(--primary-soft);
+}
+
+/* =============================================================
+   狭い画面向け微調整
+   ============================================================= */
+@media (max-width: 480px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+  .form-row label {
+    width: auto;
+  }
+  .book-cover {
+    width: 72px;
+    height: 104px;
+  }
 }

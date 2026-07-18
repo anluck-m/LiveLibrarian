@@ -17,6 +17,7 @@ const pageIndicator = document.getElementById('pageIndicator');
 const collectControls = document.getElementById('collectControls');
 const loadMoreBtn = document.getElementById('loadMoreBtn');
 const collectStatus = document.getElementById('collectStatus');
+const themeToggle = document.getElementById('themeToggle');
 
 let currentRanking = [];
 let currentFilter = 'all';
@@ -32,6 +33,23 @@ let collectScannedRank = 0; // 確認済みの最終順位
 
 let availabilityToken = 0; // 後追い貸出状況の取得が古くなった応答を無視するためのトークン
 
+// あらすじ（<details>）の展開状態を ISBN 単位で保持する。
+// 貸出状況の後追い反映で renderRanking が全再描画するため、開いていたあらすじを再現するのに使う。
+const expandedIsbns = new Set();
+
+const PREFS_KEY = 'librarian:prefs:v1';
+const THEME_KEY = 'librarian:theme';
+
+// HTML特殊文字をエスケープ（APIから来るタイトル・あらすじ等を安全に埋め込む）
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function fetchJson(url) {
   const res = await fetch(url);
   const data = await res.json();
@@ -41,19 +59,85 @@ async function fetchJson(url) {
   return data;
 }
 
-async function init() {
-  const [prefectures, genres] = await Promise.all([
-    fetchJson('/api/prefectures'),
-    fetchJson('/api/genres'),
-  ]);
-
-  prefSelect.innerHTML = prefectures.map((p) => `<option value="${p}">${p}</option>`).join('');
-  genreSelect.innerHTML = genres
-    .map((g) => `<option value="${g.id}">${g.label}</option>`)
-    .join('');
+/* =============================================================
+   テーマ切替（ライト / ダーク）
+   ============================================================= */
+function effectiveTheme() {
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'dark' || attr === 'light') return attr;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-document.getElementById('searchLibrariesBtn').addEventListener('click', async () => {
+function updateThemeButton() {
+  const current = effectiveTheme();
+  // ボタンには「切り替え先」を示すアイコンとラベルを出す
+  themeToggle.textContent = current === 'dark' ? '☀️' : '🌙';
+  const label = current === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え';
+  themeToggle.setAttribute('aria-label', label);
+  themeToggle.setAttribute('title', label);
+}
+
+themeToggle.addEventListener('click', () => {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch (e) {
+    /* localStorage不可の環境は無視 */
+  }
+  updateThemeButton();
+});
+
+// OSのテーマ設定が変わったとき、手動選択がなければボタン表示を追従させる
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!document.documentElement.getAttribute('data-theme')) updateThemeButton();
+});
+
+updateThemeButton();
+
+/* =============================================================
+   設定の記憶（都道府県・市区町村・図書館・ジャンル・並び順）
+   ============================================================= */
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function currentCheckedSystems() {
+  const checked = [...systemListEl.querySelectorAll('input[type="checkbox"]:checked')];
+  return {
+    systemIds: checked.map((c) => c.value),
+    systemNames: checked.map((c) => c.dataset.name),
+  };
+}
+
+function savePrefs() {
+  try {
+    const { systemIds, systemNames } = currentCheckedSystems();
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({
+        pref: prefSelect.value,
+        city: citySelect.value.trim(),
+        genreId: genreSelect.value,
+        sort: sortSelect.value,
+        systemIds,
+        systemNames,
+      })
+    );
+  } catch (e) {
+    /* localStorage不可の環境は無視 */
+  }
+}
+
+/* =============================================================
+   図書館検索（ボタン・設定復元の両方から呼ぶ）
+   ============================================================= */
+async function searchLibrariesFlow({ autoSelectIds } = {}) {
   librariesError.textContent = '';
   systemListEl.innerHTML = '';
   step2.hidden = true;
@@ -63,24 +147,36 @@ document.getElementById('searchLibrariesBtn').addEventListener('click', async ()
   const params = new URLSearchParams({ pref });
   if (city) params.set('city', city);
 
-  try {
-    const systems = await fetchJson(`/api/libraries?${params.toString()}`);
-    if (systems.length === 0) {
-      librariesError.textContent = '図書館システムが見つかりませんでした。市区町村の指定を変えてお試しください。';
-      return;
-    }
+  const systems = await fetchJson(`/api/libraries?${params.toString()}`);
+  if (systems.length === 0) {
+    librariesError.textContent = '図書館システムが見つかりませんでした。市区町村の指定を変えてお試しください。';
+    return;
+  }
 
-    systemListEl.innerHTML = systems
-      .map(
-        (s, i) => `
+  // 復元時：保存済みIDに一致するものをチェック。1つも一致しなければ先頭5件にフォールバック。
+  let savedSet = autoSelectIds && autoSelectIds.length ? new Set(autoSelectIds) : null;
+  if (savedSet && !systems.some((s) => savedSet.has(s.systemId))) {
+    savedSet = null;
+  }
+
+  systemListEl.innerHTML = systems
+    .map((s, i) => {
+      const checked = savedSet ? savedSet.has(s.systemId) : i < 5;
+      return `
         <label>
-          <input type="checkbox" value="${s.systemId}" data-name="${s.systemName}" ${i < 5 ? 'checked' : ''}>
-          ${s.systemName}（${s.libraries.length}館）
-        </label>`
-      )
-      .join('');
+          <input type="checkbox" value="${escapeHtml(s.systemId)}" data-name="${escapeHtml(s.systemName)}" ${checked ? 'checked' : ''}>
+          ${escapeHtml(s.systemName)}（${s.libraries.length}館）
+        </label>`;
+    })
+    .join('');
 
-    step2.hidden = false;
+  step2.hidden = false;
+}
+
+document.getElementById('searchLibrariesBtn').addEventListener('click', async () => {
+  try {
+    await searchLibrariesFlow();
+    savePrefs();
   } catch (err) {
     librariesError.textContent = err.message;
   }
@@ -89,18 +185,19 @@ document.getElementById('searchLibrariesBtn').addEventListener('click', async ()
 document.getElementById('showRankingBtn').addEventListener('click', () => {
   rankingError.textContent = '';
 
-  const checked = [...systemListEl.querySelectorAll('input[type="checkbox"]:checked')];
-  if (checked.length === 0) {
+  const { systemIds: ids, systemNames: names } = currentCheckedSystems();
+  if (ids.length === 0) {
     rankingError.textContent = '図書館システムを1つ以上選択してください。';
     return;
   }
 
-  const systemIds = checked.map((c) => c.value).join(',');
-  const systemNames = checked.map((c) => c.dataset.name).join(',');
+  const systemIds = ids.join(',');
+  const systemNames = names.join(',');
   const genreId = genreSelect.value;
   const sort = sortSelect.value;
 
   currentQuery = { systemIds, systemNames, genreId, sort };
+  savePrefs();
   // 「ランキングを表示」を押したときはフィルターを「すべて」に戻す
   currentFilter = 'all';
   [...filterBar.querySelectorAll('.filter-btn')].forEach((btn) =>
@@ -302,44 +399,156 @@ loadMoreBtn.addEventListener('click', () => {
   loadMore();
 });
 
-function renderBookCard(book) {
-  let badges;
-  if (!book.availability) {
-    // 貸出状況をまだ取得していない（後追いで反映される）
-    badges = '<span class="badge checking">蔵書を確認中…</span>';
-  } else {
-    badges = book.availability
-      .map((a) => {
-        if (a.status !== 'OK' && a.status !== 'Cache') {
-          return `<span class="badge none">${a.systemName}: 確認失敗</span>`;
-        }
-        if (a.branches.length === 0) {
-          return `<span class="badge none">${a.systemName}: 蔵書なし</span>`;
-        }
-        const cls = a.hasAvailable ? 'available' : 'unavailable';
-        const label = a.hasAvailable ? '貸出可' : '貸出中/蔵書あり';
-        return `<span class="badge ${cls}">${a.systemName}: ${label}</span>`;
-      })
-      .join('');
+// あらすじ <details> の開閉を記録する（toggleはバブルしないのでキャプチャ段階で拾う）
+rankingListEl.addEventListener(
+  'toggle',
+  (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || !el.classList.contains('book-desc')) return;
+    const isbn = el.dataset.isbn;
+    if (!isbn) return;
+    if (el.open) expandedIsbns.add(isbn);
+    else expandedIsbns.delete(isbn);
+  },
+  true
+);
+
+/* =============================================================
+   書籍カードの描画
+   ============================================================= */
+
+// レビュー（★平均＋件数）。平均が無ければ空文字を返す。
+function renderReview(book) {
+  const avg = Number(book.reviewAverage);
+  const count = Number(book.reviewCount) || 0;
+  if (!avg) return '';
+  const filled = Math.max(0, Math.min(5, Math.round(avg)));
+  const stars = '★'.repeat(filled) + '☆'.repeat(5 - filled);
+  return `<span><span class="stars">${stars}</span> ${avg.toFixed(1)}（${count}件）</span>`;
+}
+
+// メタ情報（レビュー・出版社・発売日）。無ければ何も出さない。
+function renderMeta(book) {
+  const segments = [];
+  const review = renderReview(book);
+  if (review) segments.push(review);
+  if (book.publisherName) segments.push(`<span>${escapeHtml(book.publisherName)}</span>`);
+  if (book.salesDate) segments.push(`<span>${escapeHtml(book.salesDate)}</span>`);
+  if (segments.length === 0) return '';
+  return `<p class="book-meta">${segments.join('')}</p>`;
+}
+
+// あらすじ（折りたたみ）。展開状態は expandedIsbns で保持する。
+function renderDesc(book) {
+  const caption = (book.caption || '').trim();
+  if (!caption) return '';
+  const open = expandedIsbns.has(book.isbn) ? ' open' : '';
+  return `
+    <details class="book-desc" data-isbn="${escapeHtml(book.isbn)}"${open}>
+      <summary>あらすじを見る</summary>
+      <p class="desc-body">${escapeHtml(caption)}</p>
+    </details>`;
+}
+
+// 1つの図書館システムの貸出状況（要約バッジ＋館ごとの詳細＋予約リンク）
+function renderSystemAvailability(a) {
+  const name = escapeHtml(a.systemName);
+
+  if (a.status !== 'OK' && a.status !== 'Cache') {
+    return `<div class="avail-system"><span class="badge none">${name}: 確認失敗</span></div>`;
+  }
+  if (!a.branches || a.branches.length === 0) {
+    return `<div class="avail-system"><span class="badge none">${name}: 蔵書なし</span></div>`;
   }
 
-  const calilUrl = `https://calil.jp/book/${book.isbn}`;
+  const summaryCls = a.hasAvailable ? 'available' : 'unavailable';
+  const summaryLabel = a.hasAvailable ? '貸出可' : '貸出中/蔵書あり';
+
+  const branchRows = a.branches
+    .map((b) => {
+      const isAvailable = b.status.includes('貸出可');
+      const statusCls = isAvailable ? 'available' : 'unavailable';
+      return `<li><span class="branch-name">${escapeHtml(b.branchName)}</span><span class="branch-status ${statusCls}">${escapeHtml(b.status)}</span></li>`;
+    })
+    .join('');
+
+  const reserve = a.reserveUrl
+    ? `<a class="reserve-link" href="${escapeHtml(a.reserveUrl)}" target="_blank" rel="noopener">予約ページへ</a>`
+    : '';
+
+  return `
+    <div class="avail-system">
+      <span class="badge ${summaryCls}">${name}: ${summaryLabel}</span>
+      <details class="avail-detail">
+        <summary>館ごとの状況（${a.branches.length}館）</summary>
+        <ul class="branch-list">${branchRows}</ul>
+        ${reserve}
+      </details>
+    </div>`;
+}
+
+function renderAvailability(book) {
+  if (!book.availability) {
+    // 貸出状況をまだ取得していない（後追いで反映される）
+    return '<span class="badge checking">蔵書を確認中…</span>';
+  }
+  return book.availability.map(renderSystemAvailability).join('');
+}
+
+function renderBookCard(book) {
+  const title = escapeHtml(book.title);
+  const itemUrl = escapeHtml(book.itemUrl || '');
+  const calilUrl = `https://calil.jp/book/${encodeURIComponent(book.isbn)}`;
 
   return `
     <article class="book-card">
       <div class="book-rank">${book.rank}</div>
-      <img src="${book.imageUrl || ''}" alt="${book.title}" onerror="this.style.visibility='hidden'">
+      <img class="book-cover" src="${escapeHtml(book.imageUrl || '')}" alt="${title}" onerror="this.style.visibility='hidden'">
       <div class="book-info">
-        <h3><a href="${book.itemUrl}" target="_blank" rel="noopener">${book.title}</a></h3>
-        <p class="author">${book.author || ''}</p>
-        <div class="availability-list">${badges}</div>
+        <h3><a href="${itemUrl}" target="_blank" rel="noopener">${title}</a></h3>
+        <p class="author">${escapeHtml(book.author || '')}</p>
+        ${renderMeta(book)}
+        <div class="availability">${renderAvailability(book)}</div>
+        ${renderDesc(book)}
         <div class="book-links">
-          <a class="book-link rakuten" href="${book.itemUrl}" target="_blank" rel="noopener">楽天ブックスで見る</a>
+          <a class="book-link rakuten" href="${itemUrl}" target="_blank" rel="noopener">楽天ブックスで見る</a>
           <a class="book-link calil" href="${calilUrl}" target="_blank" rel="noopener">カーリルで蔵書検索</a>
         </div>
       </div>
     </article>
   `;
+}
+
+/* =============================================================
+   起動処理
+   ============================================================= */
+async function init() {
+  const [prefectures, genres] = await Promise.all([
+    fetchJson('/api/prefectures'),
+    fetchJson('/api/genres'),
+  ]);
+
+  prefSelect.innerHTML = prefectures.map((p) => `<option value="${p}">${p}</option>`).join('');
+  genreSelect.innerHTML = genres
+    .map((g) => `<option value="${g.id}">${g.label}</option>`)
+    .join('');
+
+  // 前回の設定を復元（都道府県・市区町村・ジャンル・並び順・図書館の選択）
+  const prefs = loadPrefs();
+  if (prefs) {
+    if (prefs.pref) prefSelect.value = prefs.pref;
+    if (typeof prefs.city === 'string') citySelect.value = prefs.city;
+    if (prefs.genreId) genreSelect.value = prefs.genreId;
+    if (prefs.sort) sortSelect.value = prefs.sort;
+    if (prefs.pref) {
+      try {
+        await searchLibrariesFlow({ autoSelectIds: prefs.systemIds || [] });
+      } catch (err) {
+        // 復元時の自動検索が失敗してもアプリ自体は使えるようにする
+        console.error('図書館設定の復元に失敗:', err.message);
+      }
+    }
+  }
 }
 
 init();
