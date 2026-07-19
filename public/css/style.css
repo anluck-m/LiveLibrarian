@@ -5,10 +5,10 @@
    値を差し替えるだけで反映できるようにしている。
    ============================================================= */
 :root {
-  /* 色（ライト） */
-  --bg: #f4f4f5;
+  /* 色（ライト） — Claude Design バリアントA（暖色ペーパー） */
+  --bg: #f6f3ee;
   --surface: #ffffff;
-  --surface-2: #f7f8fa;   /* カード内のネスト面（図書館リスト・あらすじ等） */
+  --surface-2: #faf8f3;   /* カード内のネスト面（図書館リスト・あらすじ等） */
   --text: #222222;
   --text-sub: #5a6473;
   --text-muted: #718096;
@@ -29,6 +29,7 @@
   --neutral-bg: #e2e8f0; --neutral-fg: #4a5568;
   --warn-bg: #feebc8;    --warn-fg: #7b341e;
 
+  --star: #f6a609; /* レビューの星（金・ライト/ダーク共通） */
   --error: #c53030;
   --rakuten: #bf0000;
   --rakuten-hover: #990000;
@@ -42,16 +43,17 @@
   --space-8: 2rem;
 
   /* 角丸 */
-  --radius-card: 12px;
+  --radius-card: 16px;
   --radius-btn: 8px;
   --radius-input: 6px;
   --radius-pill: 999px;
 
   /* 影 */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.08);
 
-  --font-sans: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --font-sans: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  --font-serif: "Shippori Mincho", "Yu Mincho", serif; /* 見出し・書籍タイトル */
 
   color-scheme: light;
 }
@@ -71,7 +73,7 @@
   --border: #2a2f3a;
   --border-strong: #3a4150;
 
-  --primary: #5b8dd6;
+  --primary: #6ba1e6;
   --primary-hover: #74a1e4;
   --primary-soft: #1e2a3d;
   --on-primary: #0f1115;
@@ -256,6 +258,27 @@ main {
 
 .card h2 {
   margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+/* ステップ番号バッジ */
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  flex-shrink: 0;
+  background: var(--brand-grad);
+  color: #fff;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .form-row {
@@ -410,9 +433,12 @@ button:hover {
 /* =============================================================
    ランキングリスト（広画面は2列グリッド）
    ============================================================= */
+/* 書籍カードは常に縦1列。カードの中身も常に縦積みにし、画面幅でレイアウトを作り分けない。
+   （2列グリッドは1枚あたりが狭く情報が密で窮屈、カード内2カラム＋右サイドの貸出状況も
+     「上から順に読む流れ」が崩れるため、どちらも試したうえで不採用） */
 .ranking-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
@@ -489,6 +515,8 @@ button:hover {
 
 .book-info h3 {
   margin: 0 0 0.3rem;
+  font-family: var(--font-serif);
+  font-weight: 600;
   font-size: 1.05rem;
   line-height: 1.4;
 }
@@ -519,12 +547,8 @@ button:hover {
 }
 
 .book-meta .stars {
-  color: #d69e2e;
-  letter-spacing: -0.05em;
-}
-
-:root[data-theme="dark"] .book-meta .stars {
-  color: #e6b878;
+  color: var(--star);
+  letter-spacing: 0.05em;
 }
 
 /* あらすじ（折りたたみ） */

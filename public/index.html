@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>librarian - 近くの図書館で借りられる人気本ランキング</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Shippori+Mincho:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <script>
   // 描画前にテーマを確定して、ダーク選択時のちらつき（FOUC）を防ぐ。
@@ -30,7 +33,7 @@
 
   <main>
     <section class="card" id="step1">
-      <h2>1. 地域を選んで図書館を探す</h2>
+      <h2><span class="step-num">1</span>地域を選んで図書館を探す</h2>
       <div class="form-row">
         <label for="pref">都道府県</label>
         <select id="pref"></select>
@@ -44,7 +47,7 @@
     </section>
 
     <section class="card" id="step2" hidden>
-      <h2>2. ジャンルと並び順を選んで本を探す</h2>
+      <h2><span class="step-num">2</span>ジャンルと並び順を選んで本を探す</h2>
       <div id="systemList" class="system-list"></div>
       <div class="form-row">
         <label for="genre">ジャンル</label>
