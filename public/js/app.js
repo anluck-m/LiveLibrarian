@@ -1,5 +1,9 @@
-const prefSelect = document.getElementById('pref');
+const prefMap = document.getElementById('prefMap');
 const citySelect = document.getElementById('city');
+const nearbyBtn = document.getElementById('nearbyBtn');
+const nearbyStatus = document.getElementById('nearbyStatus');
+const orDivider = document.getElementById('orDivider');
+const searchLibrariesBtn = document.getElementById('searchLibrariesBtn');
 const genreSelect = document.getElementById('genre');
 const sortSelect = document.getElementById('sort');
 const systemListEl = document.getElementById('systemList');
@@ -33,12 +37,17 @@ let collectScannedRank = 0; // 確認済みの最終順位
 
 let availabilityToken = 0; // 後追い貸出状況の取得が古くなった応答を無視するためのトークン
 
+let selectedPref = ''; // 県名チップで選択中の都道府県。未選択なら空文字。
+
 // あらすじ（<details>）の展開状態を ISBN 単位で保持する。
 // 貸出状況の後追い反映で renderRanking が全再描画するため、開いていたあらすじを再現するのに使う。
 const expandedIsbns = new Set();
 
 const PREFS_KEY = 'librarian:prefs:v1';
 const THEME_KEY = 'librarian:theme';
+
+const DEFAULT_CHECKED_SYSTEMS = 5; // 検索直後に自動でチェックしておく図書館システム数
+const NEARBY_LIMIT = 30; // 現在地検索で取得する図書館数
 
 // HTML特殊文字をエスケープ（APIから来るタイトル・あらすじ等を安全に埋め込む）
 function escapeHtml(str) {
@@ -117,12 +126,18 @@ function currentCheckedSystems() {
 
 function savePrefs() {
   try {
+    const previous = loadPrefs() || {};
     const { systemIds, systemNames } = currentCheckedSystems();
+    // 現在地検索では都道府県を選ばない。そのときに空で上書きすると、
+    // ふだん地域選択を使っているユーザーの保存済みの地域が消えてしまうので残す。
+    const region = selectedPref
+      ? { pref: selectedPref, city: citySelect.value }
+      : { pref: previous.pref || '', city: previous.city || '' };
+
     localStorage.setItem(
       PREFS_KEY,
       JSON.stringify({
-        pref: prefSelect.value,
-        city: citySelect.value.trim(),
+        ...region,
         genreId: genreSelect.value,
         sort: sortSelect.value,
         systemIds,
@@ -135,25 +150,112 @@ function savePrefs() {
 }
 
 /* =============================================================
-   図書館検索（ボタン・設定復元の両方から呼ぶ）
+   都道府県の選択（地方ごとにまとめた県名チップ）
    ============================================================= */
-async function searchLibrariesFlow({ autoSelectIds } = {}) {
+// 選択は「県名チップ」で行う。地方ごとにカードでグループ化し、地方の並び順
+// （北→南）で素直に並べる。地理的な配置はしない。データは pref-map.js。
+// 名前の一覧はサーバー（/api/prefectures）が持つが、地方への割り当ては
+// PREF_REGIONS が持つため、prefectures 引数は使わずデータ側の順序で描画する。
+function renderPrefMap() {
+  prefMap.innerHTML = Object.entries(PREF_REGIONS)
+    .map(([region, prefs]) => {
+      const chips = prefs
+        .map(
+          (name) =>
+            `<button type="button" class="pref-chip" data-pref="${escapeHtml(name)}" aria-pressed="false">` +
+            `${escapeHtml(shortPrefName(name))}</button>`
+        )
+        .join('');
+      return `<div class="pref-region" data-region="${region}">
+        <span class="pref-region-name">${escapeHtml(PREF_REGION_LABEL[region])}</span>
+        <div class="pref-chips">${chips}</div>
+      </div>`;
+    })
+    .join('');
+}
+
+// 都道府県が選ばれたときの連動。市区町村を選び直させ、図書館一覧は破棄する。
+// （以前は都道府県を変えても市区町村が残り、「大阪府 / 渋谷区」のような
+//   必ず0件になる組み合わせで検索できてしまっていた）
+async function selectPref(name) {
+  selectedPref = name;
+  for (const chip of prefMap.querySelectorAll('.pref-chip')) {
+    chip.setAttribute('aria-pressed', String(chip.dataset.pref === name));
+  }
+
   librariesError.textContent = '';
   systemListEl.innerHTML = '';
   step2.hidden = true;
 
-  const pref = prefSelect.value;
-  const city = citySelect.value.trim();
-  const params = new URLSearchParams({ pref });
-  if (city) params.set('city', city);
+  await loadCities(name);
+}
 
-  const systems = await fetchJson(`/api/libraries?${params.toString()}`);
-  if (systems.length === 0) {
-    librariesError.textContent = '図書館システムが見つかりませんでした。市区町村の指定を変えてお試しください。';
-    return;
+/* =============================================================
+   市区町村（カーリルが実際に返す市区町村名から選択肢を作る）
+   ============================================================= */
+// 末尾の文字で区/市/町/村にまとめる。北海道は134件あり、
+// 素の一覧だと探せないため <optgroup> で塊にする。
+const CITY_GROUP_SUFFIXES = ['区', '市', '町', '村'];
+
+function groupCities(cities) {
+  const groups = new Map(CITY_GROUP_SUFFIXES.map((s) => [s, []]));
+  const others = [];
+  for (const city of cities) {
+    const bucket = groups.get(city.slice(-1));
+    (bucket || others).push(city);
   }
+  const result = [...groups].filter(([, list]) => list.length > 0);
+  if (others.length > 0) result.push(['その他', others]);
+  return result;
+}
 
-  // 復元時：保存済みIDに一致するものをチェック。1つも一致しなければ先頭5件にフォールバック。
+function setCityOptions(html, disabled) {
+  citySelect.innerHTML = html;
+  citySelect.disabled = disabled;
+}
+
+async function loadCities(pref) {
+  setCityOptions('<option value="">読み込み中…</option>', true);
+  try {
+    const cities = await fetchJson(`/api/cities?pref=${encodeURIComponent(pref)}`);
+    const options = groupCities(cities)
+      .map(
+        ([label, list]) =>
+          `<optgroup label="${escapeHtml(label)}">` +
+          list.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('') +
+          `</optgroup>`
+      )
+      .join('');
+    setCityOptions(`<option value="">指定なし（${escapeHtml(pref)}すべて）</option>${options}`, false);
+  } catch (err) {
+    // 市区町村が取れなくても「県内すべて」で検索はできるので、機能自体は止めない
+    setCityOptions('<option value="">指定なし（県内すべて）</option>', false);
+    librariesError.textContent = `市区町村の一覧を取得できませんでした（${err.message}）。県内すべてで検索できます。`;
+  }
+}
+
+/* =============================================================
+   図書館検索（地域から／現在地から）
+   ============================================================= */
+function formatDistance(km) {
+  if (!Number.isFinite(km)) return '';
+  return km < 1 ? `約${Math.round(km * 1000)}m` : `約${km.toFixed(1)}km`;
+}
+
+// 検索中はボタンを押せなくする（以前は無反応に見えて連打でき、多重リクエストになっていた）
+function setBusy(button, busyLabel) {
+  button.dataset.idleHtml = button.innerHTML;
+  button.innerHTML = escapeHtml(busyLabel);
+  button.disabled = true;
+}
+
+function clearBusy(button) {
+  if (button.dataset.idleHtml) button.innerHTML = button.dataset.idleHtml;
+  button.disabled = false;
+}
+
+function renderSystemList(systems, { autoSelectIds } = {}) {
+  // 復元時：保存済みIDに一致するものをチェック。1つも一致しなければ先頭数件にフォールバック。
   let savedSet = autoSelectIds && autoSelectIds.length ? new Set(autoSelectIds) : null;
   if (savedSet && !systems.some((s) => savedSet.has(s.systemId))) {
     savedSet = null;
@@ -161,11 +263,13 @@ async function searchLibrariesFlow({ autoSelectIds } = {}) {
 
   systemListEl.innerHTML = systems
     .map((s, i) => {
-      const checked = savedSet ? savedSet.has(s.systemId) : i < 5;
+      const checked = savedSet ? savedSet.has(s.systemId) : i < DEFAULT_CHECKED_SYSTEMS;
+      const distance = formatDistance(s.nearestDistance);
       return `
         <label>
           <input type="checkbox" value="${escapeHtml(s.systemId)}" data-name="${escapeHtml(s.systemName)}" ${checked ? 'checked' : ''}>
           ${escapeHtml(s.systemName)}（${s.libraries.length}館）
+          ${distance ? `<span class="system-distance">${distance}</span>` : ''}
         </label>`;
     })
     .join('');
@@ -173,12 +277,87 @@ async function searchLibrariesFlow({ autoSelectIds } = {}) {
   step2.hidden = false;
 }
 
-document.getElementById('searchLibrariesBtn').addEventListener('click', async () => {
+async function searchLibrariesFlow({ autoSelectIds } = {}) {
+  librariesError.textContent = '';
+  systemListEl.innerHTML = '';
+  step2.hidden = true;
+
+  if (!selectedPref) {
+    librariesError.textContent = '地図から都道府県を選んでください。';
+    return;
+  }
+
+  const params = new URLSearchParams({ pref: selectedPref });
+  if (citySelect.value) params.set('city', citySelect.value);
+
+  const systems = await fetchJson(`/api/libraries?${params.toString()}`);
+  if (systems.length === 0) {
+    librariesError.textContent = '公共図書館が見つかりませんでした。市区町村を「指定なし」にしてお試しください。';
+    return;
+  }
+
+  renderSystemList(systems, { autoSelectIds });
+}
+
+// 現在地から近い図書館を探す。カーリルの geocode 検索を使い、距離順に並べる。
+async function searchNearbyFlow() {
+  librariesError.textContent = '';
+  nearbyStatus.textContent = '';
+  systemListEl.innerHTML = '';
+  step2.hidden = true;
+
+  const position = await new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false,
+      timeout: 10000,
+      maximumAge: 300000,
+    });
+  });
+
+  const { latitude, longitude } = position.coords;
+  const systems = await fetchJson(
+    `/api/libraries?lat=${latitude}&lng=${longitude}&limit=${NEARBY_LIMIT}`
+  );
+  if (systems.length === 0) {
+    librariesError.textContent = '近くに公共図書館が見つかりませんでした。地域から選んでお試しください。';
+    return;
+  }
+
+  renderSystemList(systems);
+  nearbyStatus.textContent = `現在地から近い順に${systems.length}件の図書館システムが見つかりました。`;
+}
+
+// 位置情報の失敗はユーザーが取れる行動が違うので、原因ごとに文言を分ける
+function geolocationErrorMessage(err) {
+  if (err && typeof err.code === 'number') {
+    if (err.code === 1) return '位置情報の利用が許可されませんでした。地域から選んでお試しください。';
+    if (err.code === 2) return '現在地を取得できませんでした。地域から選んでお試しください。';
+    if (err.code === 3) return '現在地の取得に時間がかかっています。地域から選んでお試しください。';
+  }
+  return err?.message || '現在地から探せませんでした。地域から選んでお試しください。';
+}
+
+searchLibrariesBtn.addEventListener('click', async () => {
+  setBusy(searchLibrariesBtn, '探しています…');
   try {
     await searchLibrariesFlow();
     savePrefs();
   } catch (err) {
     librariesError.textContent = err.message;
+  } finally {
+    clearBusy(searchLibrariesBtn);
+  }
+});
+
+nearbyBtn.addEventListener('click', async () => {
+  setBusy(nearbyBtn, '現在地を確認しています…');
+  try {
+    await searchNearbyFlow();
+    savePrefs();
+  } catch (err) {
+    librariesError.textContent = geolocationErrorMessage(err);
+  } finally {
+    clearBusy(nearbyBtn);
   }
 });
 
@@ -522,26 +701,44 @@ function renderBookCard(book) {
 /* =============================================================
    起動処理
    ============================================================= */
+// チップは動的に描き直すので、個々のボタンではなく地図全体で受ける
+prefMap.addEventListener('click', (event) => {
+  const chip = event.target.closest('.pref-chip');
+  if (chip) selectPref(chip.dataset.pref);
+});
+
+// 位置情報が使えないなら「現在地から探す」は最初から出さない。
+// HTTPSかlocalhostでないと geolocation は動かないため（例: LANのIPで開いた場合）。
+function setupNearbyButton() {
+  const available = 'geolocation' in navigator && window.isSecureContext;
+  nearbyBtn.hidden = !available;
+  orDivider.hidden = !available;
+}
+
 async function init() {
+  setupNearbyButton();
+
   const [prefectures, genres] = await Promise.all([
     fetchJson('/api/prefectures'),
     fetchJson('/api/genres'),
   ]);
 
-  prefSelect.innerHTML = prefectures.map((p) => `<option value="${p}">${p}</option>`).join('');
+  renderPrefMap();
   genreSelect.innerHTML = genres
     .map((g) => `<option value="${g.id}">${g.label}</option>`)
     .join('');
 
-  // 前回の設定を復元（都道府県・市区町村・ジャンル・並び順・図書館の選択）
+  // 前回の設定を復元（都道府県・市区町村・ジャンル・並び順・図書館の選択）。
+  // 現在地モードは復元しない（起動のたびに位置情報の許可を求めることになるため）。
   const prefs = loadPrefs();
   if (prefs) {
-    if (prefs.pref) prefSelect.value = prefs.pref;
-    if (typeof prefs.city === 'string') citySelect.value = prefs.city;
     if (prefs.genreId) genreSelect.value = prefs.genreId;
     if (prefs.sort) sortSelect.value = prefs.sort;
     if (prefs.pref) {
       try {
+        // 市区町村の選択肢が揃ってからでないと保存済みのcityを選べない
+        await selectPref(prefs.pref);
+        if (prefs.city) citySelect.value = prefs.city;
         await searchLibrariesFlow({ autoSelectIds: prefs.systemIds || [] });
       } catch (err) {
         // 復元時の自動検索が失敗してもアプリ自体は使えるようにする

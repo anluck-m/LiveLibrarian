@@ -17,8 +17,56 @@ const PUBLIC_LIBRARY_CATEGORIES = new Set(['LARGE', 'MEDIUM', 'SMALL', 'BM']);
 const MAX_SCAN_PAGES = 5;
 const RAKUTEN_THROTTLE_MS = 1100; // 楽天のQPS制限(約1req/s)対策
 
+const NEARBY_LIMIT = 30; // 現在地検索でカーリルに要求する図書館数
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 図書館マスタはほぼ静的なので、都道府県単位でプロセス内にキャッシュする。
+// /cities と /libraries?pref= は同じカーリル呼び出しになるため、両方をここから導出する。
+// 取得中のPromiseごと保持して、同時リクエストで二重に叩かないようにする。
+const prefLibrariesCache = new Map();
+
+function getPrefLibraries(pref) {
+  if (!prefLibrariesCache.has(pref)) {
+    const pending = searchLibraries({ pref })
+      .then((libraries) => libraries.filter((lib) => PUBLIC_LIBRARY_CATEGORIES.has(lib.category)))
+      .catch((error) => {
+        prefLibrariesCache.delete(pref); // 失敗はキャッシュに残さず、次回リトライできるようにする
+        throw error;
+      });
+    prefLibrariesCache.set(pref, pending);
+  }
+  return prefLibrariesCache.get(pref);
+}
+
+// カーリルの図書館配列を図書館システム単位にまとめる。
+// geocode検索のときは各館にdistance(km)が付くので、システムごとの最短距離も持たせる。
+function groupBySystem(libraries) {
+  const systemMap = new Map();
+  for (const lib of libraries) {
+    if (!systemMap.has(lib.systemid)) {
+      systemMap.set(lib.systemid, {
+        systemId: lib.systemid,
+        systemName: lib.systemname,
+        nearestDistance: null,
+        libraries: [],
+      });
+    }
+    const system = systemMap.get(lib.systemid);
+    const distance = Number(lib.distance);
+    const hasDistance = Number.isFinite(distance);
+    system.libraries.push({
+      name: lib.formal || lib.short,
+      address: lib.address,
+      distance: hasDistance ? distance : null,
+    });
+    if (hasDistance && (system.nearestDistance === null || distance < system.nearestDistance)) {
+      system.nearestDistance = distance;
+    }
+  }
+  return Array.from(systemMap.values());
 }
 
 // 1つのISBNについて、各図書館システムでの貸出状況の配列を作る
@@ -73,35 +121,60 @@ router.get('/genres', (req, res) => {
   res.json(GENRES);
 });
 
-// 都道府県・市区町村から近隣の図書館システム一覧を取得する
-router.get('/libraries', async (req, res) => {
-  const { pref, city } = req.query;
+// 指定した都道府県で、実際に図書館が存在する市区町村名の一覧を返す。
+// カーリル自身が返すcityフィールドから作るため、ここで選んだ値は必ずヒットする
+// （手入力だと「渋谷」「しぶや区」のような表記ゆれで0件になっていた）。
+router.get('/cities', async (req, res) => {
+  const { pref } = req.query;
   if (!pref) {
     return res.status(400).json({ error: 'pref（都道府県）は必須です。' });
   }
 
   try {
-    const libraries = await searchLibraries({ pref, city });
+    const libraries = await getPrefLibraries(pref);
+    // 並べ替えない。カーリルの応答は読み（ローマ字）順に並んでおり
+    // （足立区→あきる野市→昭島市→荒川区…）、JSのlocaleCompare('ja')を使うと
+    // 漢字が部首順になってこの読み順が壊れるため。
+    res.json([...new Set(libraries.map((lib) => lib.city).filter(Boolean))]);
+  } catch (error) {
+    console.error(error);
+    res.status(502).json({ error: error.message || '市区町村情報の取得に失敗しました。' });
+  }
+});
 
-    const systemMap = new Map();
-    for (const lib of libraries) {
-      if (!PUBLIC_LIBRARY_CATEGORIES.has(lib.category)) {
-        continue;
+// 図書館システム一覧を返す。都道府県・市区町村で絞るか、lat/lngで現在地の近隣を取る。
+router.get('/libraries', async (req, res) => {
+  const { pref, city, lat, lng, limit } = req.query;
+  const hasGeo = lat !== undefined && lng !== undefined;
+
+  if (!pref && !hasGeo) {
+    return res.status(400).json({ error: 'pref（都道府県）または lat/lng（現在地）が必要です。' });
+  }
+
+  try {
+    let systems;
+
+    if (hasGeo) {
+      const latitude = Number(lat);
+      const longitude = Number(lng);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return res.status(400).json({ error: 'lat/lng の値が不正です。' });
       }
-      if (!systemMap.has(lib.systemid)) {
-        systemMap.set(lib.systemid, {
-          systemId: lib.systemid,
-          systemName: lib.systemname,
-          libraries: [],
-        });
-      }
-      systemMap.get(lib.systemid).libraries.push({
-        name: lib.formal || lib.short,
-        address: lib.address,
+      // geocodeは「経度,緯度」の順。座標は毎回異なるためキャッシュしない。
+      const libraries = await searchLibraries({
+        geocode: `${longitude},${latitude}`,
+        limit: Number(limit) || NEARBY_LIMIT,
       });
+      systems = groupBySystem(libraries.filter((lib) => PUBLIC_LIBRARY_CATEGORIES.has(lib.category)));
+      systems.sort((a, b) => (a.nearestDistance ?? Infinity) - (b.nearestDistance ?? Infinity));
+    } else {
+      // 市区町村の絞り込みはカーリルに投げ直さずローカルで行う。
+      // 選択肢を lib.city から作っている以上、この等価比較のほうが厳密に一貫する。
+      const libraries = await getPrefLibraries(pref);
+      systems = groupBySystem(city ? libraries.filter((lib) => lib.city === city) : libraries);
     }
 
-    res.json(Array.from(systemMap.values()));
+    res.json(systems);
   } catch (error) {
     console.error(error);
     res.status(502).json({ error: error.message || '図書館情報の取得に失敗しました。' });

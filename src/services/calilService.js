@@ -16,13 +16,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 都道府県・市区町村から近隣の図書館一覧を取得する
-export async function searchLibraries({ pref, city }) {
+// 図書館一覧を取得する。都道府県・市区町村で絞るか、geocodeで現在地の近隣を取る。
+// geocodeは「経度,緯度」の順（緯度が先ではない）。指定すると各館に distance（km）が付く。
+// undefinedのパラメータはaxiosが送出しないため、使わない絞り込みは渡さなくてよい。
+export async function searchLibraries({ pref, city, geocode, limit }) {
   const { data } = await axios.get(`${CALIL_BASE_URL}/library`, {
     params: {
       appkey: getAppKey(),
       pref,
       city,
+      geocode,
+      limit,
       format: 'json',
       callback: 'no',
     },

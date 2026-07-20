@@ -30,6 +30,16 @@
   --warn-bg: #feebc8;    --warn-fg: #7b341e;
 
   --star: #f6a609; /* レビューの星（金・ライト/ダーク共通） */
+  /* 8地方の色（地域選択の地方カード・県名チップ）。淡い地色は color-mix でサーフェスと混ぜて作る */
+  --region-hokkaido: #2f5fbf;
+  --region-tohoku: #26709f;
+  --region-kanto: #24803f;
+  --region-chubu: #4e7420;
+  --region-kinki: #8a7407;
+  --region-chugoku: #c43d76;
+  --region-shikoku: #a35800;
+  --region-kyushu: #c43048;
+  --tile-on-strong: #ffffff;
   --error: #c53030;
   --rakuten: #bf0000;
   --rakuten-hover: #990000;
@@ -93,6 +103,17 @@
 
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+  /* 8地方の色（ダーク）。明るくして、選択時の文字を暗くする（--on-primary と同じ考え方） */
+  --region-hokkaido: #6f9ae8;
+  --region-tohoku: #63b0dd;
+  --region-kanto: #5fbe7c;
+  --region-chubu: #9cc95f;
+  --region-kinki: #d9c74a;
+  --region-chugoku: #e8759f;
+  --region-shikoku: #e3963f;
+  --region-kyushu: #e8697e;
+  --tile-on-strong: #0f1115;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -127,6 +148,17 @@
 
     --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
     --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+    /* 8地方の色（ダーク）。明るくして、選択時の文字を暗くする（--on-primary と同じ考え方） */
+    --region-hokkaido: #6f9ae8;
+    --region-tohoku: #63b0dd;
+    --region-kanto: #5fbe7c;
+    --region-chubu: #9cc95f;
+    --region-kinki: #d9c74a;
+    --region-chugoku: #e8759f;
+    --region-shikoku: #e3963f;
+    --region-kyushu: #e8697e;
+    --tile-on-strong: #0f1115;
   }
 }
 
@@ -322,9 +354,140 @@ button:hover {
   background: var(--primary-hover);
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+button:disabled:hover {
+  background: var(--primary);
+}
+
 .error {
   color: var(--error);
   min-height: 1.2em;
+}
+
+/* -------------------------------------------------------------
+   現在地から探す
+   ------------------------------------------------------------- */
+.nearby-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-weight: 700;
+}
+
+.nearby-status {
+  margin: var(--space-2) 0 0;
+  color: var(--text-sub);
+  font-size: 0.9rem;
+  min-height: 1.2em;
+}
+
+/* 「または地域から選ぶ」— 両側に線を引く区切り */
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.or-divider::before,
+.or-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* -------------------------------------------------------------
+   都道府県の選択：地方ごとにまとめた県名チップ
+   地方カードを北→南の順に、幅に応じた多段グリッドで並べる。
+   選択は県名チップで行い、地図は使わない。
+   ------------------------------------------------------------- */
+.pref-map {
+  display: grid;
+  /* 広い画面では複数列、狭い画面では自動的に1列になる */
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-2);
+  /* 全カードを同じ高さに揃える。auto-rows:1fr で全行を最も高い行に合わせ、
+     stretch（既定）でカードを行の高さまで引き伸ばす。 */
+  grid-auto-rows: 1fr;
+  margin-bottom: var(--space-4);
+}
+
+.pref-region {
+  --strong: var(--primary);
+  background: color-mix(in srgb, var(--strong) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--strong) 32%, var(--surface));
+  border-radius: var(--radius-input);
+  padding: var(--space-3);
+}
+.pref-region[data-region="hokkaido"] { --strong: var(--region-hokkaido); }
+.pref-region[data-region="tohoku"]   { --strong: var(--region-tohoku); }
+.pref-region[data-region="kanto"]    { --strong: var(--region-kanto); }
+.pref-region[data-region="chubu"]    { --strong: var(--region-chubu); }
+.pref-region[data-region="kinki"]    { --strong: var(--region-kinki); }
+.pref-region[data-region="chugoku"]  { --strong: var(--region-chugoku); }
+.pref-region[data-region="shikoku"]  { --strong: var(--region-shikoku); }
+.pref-region[data-region="kyushu"]   { --strong: var(--region-kyushu); }
+
+.pref-region-name {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--strong) 78%, var(--text));
+  margin-bottom: var(--space-2);
+}
+
+.pref-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.pref-chip {
+  /* 全体の button ルール（primary背景）を打ち消す */
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 0.28rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.pref-chip:hover {
+  border-color: var(--strong);
+  background: color-mix(in srgb, var(--strong) 14%, var(--surface));
+}
+
+.pref-chip[aria-pressed="true"] {
+  background: var(--strong);
+  color: var(--tile-on-strong);
+  border-color: var(--strong);
+  font-weight: 700;
+}
+
+.pref-chip:focus-visible {
+  outline: 2px solid var(--strong);
+  outline-offset: 1px;
+}
+
+/* 現在地検索のときだけ出る「約1.2km」 */
+.system-distance {
+  color: var(--text-muted);
+  font-size: 0.85em;
 }
 
 .system-list {
