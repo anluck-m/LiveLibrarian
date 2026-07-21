@@ -257,7 +257,29 @@ function clearBusy(button) {
   button.disabled = false;
 }
 
+// 図書館システム名＋館数＋（あれば）距離のラベル本文
+function systemLabelHtml(s) {
+  const distance = formatDistance(s.nearestDistance);
+  return `${escapeHtml(s.systemName)}（${s.libraries.length}館）` +
+    (distance ? ` <span class="system-distance">${distance}</span>` : '');
+}
+
 function renderSystemList(systems, { autoSelectIds } = {}) {
+  // 図書館システムが1つだけなら選ぶ余地がないので、チェックボックスは出さず
+  // 「対象の図書館」として確定表示する。値は hidden の checked input で保持し、
+  // 以降の処理（currentCheckedSystems 等）は複数のときと同じ経路を通す。
+  if (systems.length === 1) {
+    const s = systems[0];
+    systemListEl.innerHTML = `
+      <div class="system-single">
+        <input type="checkbox" value="${escapeHtml(s.systemId)}" data-name="${escapeHtml(s.systemName)}" checked hidden>
+        <span class="system-single-label">対象の図書館</span>
+        <span class="system-single-name">${systemLabelHtml(s)}</span>
+      </div>`;
+    step2.hidden = false;
+    return;
+  }
+
   // 復元時：保存済みIDに一致するものをチェック。1つも一致しなければ先頭数件にフォールバック。
   let savedSet = autoSelectIds && autoSelectIds.length ? new Set(autoSelectIds) : null;
   if (savedSet && !systems.some((s) => savedSet.has(s.systemId))) {
@@ -267,12 +289,10 @@ function renderSystemList(systems, { autoSelectIds } = {}) {
   systemListEl.innerHTML = systems
     .map((s, i) => {
       const checked = savedSet ? savedSet.has(s.systemId) : i < DEFAULT_CHECKED_SYSTEMS;
-      const distance = formatDistance(s.nearestDistance);
       return `
         <label>
           <input type="checkbox" value="${escapeHtml(s.systemId)}" data-name="${escapeHtml(s.systemName)}" ${checked ? 'checked' : ''}>
-          ${escapeHtml(s.systemName)}（${s.libraries.length}館）
-          ${distance ? `<span class="system-distance">${distance}</span>` : ''}
+          ${systemLabelHtml(s)}
         </label>`;
     })
     .join('');

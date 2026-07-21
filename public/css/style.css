@@ -555,6 +555,24 @@ button:disabled:hover {
   cursor: pointer;
 }
 
+/* 図書館システムが1つだけのとき（選ぶ余地がないのでチェックボックスは出さない） */
+.system-single {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.system-single-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-sub);
+}
+
+.system-single-name {
+  font-weight: 500;
+}
+
 /* =============================================================
    ローディング
    ============================================================= */
