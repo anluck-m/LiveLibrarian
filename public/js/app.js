@@ -1,8 +1,11 @@
 const prefMap = document.getElementById('prefMap');
 const citySelect = document.getElementById('city');
-const nearbyBtn = document.getElementById('nearbyBtn');
+const modeChooser = document.getElementById('modeChooser');
+const modeNearbyBtn = document.getElementById('modeNearbyBtn');
+const modeRegionBtn = document.getElementById('modeRegionBtn');
+const backToModeBtn = document.getElementById('backToModeBtn');
+const regionPanel = document.getElementById('regionPanel');
 const nearbyStatus = document.getElementById('nearbyStatus');
-const orDivider = document.getElementById('orDivider');
 const searchLibrariesBtn = document.getElementById('searchLibrariesBtn');
 const genreSelect = document.getElementById('genre');
 const sortSelect = document.getElementById('sort');
@@ -283,7 +286,7 @@ async function searchLibrariesFlow({ autoSelectIds } = {}) {
   step2.hidden = true;
 
   if (!selectedPref) {
-    librariesError.textContent = '地図から都道府県を選んでください。';
+    librariesError.textContent = '都道府県を選んでください。';
     return;
   }
 
@@ -302,7 +305,7 @@ async function searchLibrariesFlow({ autoSelectIds } = {}) {
 // 現在地から近い図書館を探す。カーリルの geocode 検索を使い、距離順に並べる。
 async function searchNearbyFlow() {
   librariesError.textContent = '';
-  nearbyStatus.textContent = '';
+  nearbyStatus.textContent = '現在地を確認しています…';
   systemListEl.innerHTML = '';
   step2.hidden = true;
 
@@ -349,15 +352,21 @@ searchLibrariesBtn.addEventListener('click', async () => {
   }
 });
 
-nearbyBtn.addEventListener('click', async () => {
-  setBusy(nearbyBtn, '現在地を確認しています…');
+// 探し方の選択（2択カード）と、選んだあとの「← 探し方を選ぶ」による戻り
+modeRegionBtn.addEventListener('click', () => enterMode('region'));
+backToModeBtn.addEventListener('click', () => showChooser());
+
+// 現在地カードは押すと即座に位置情報検索を走らせる。カード自体は隠れるため、
+// 進捗は nearbyStatus のテキストで示す（setBusy はカードには使わない）。
+modeNearbyBtn.addEventListener('click', async () => {
+  enterMode('nearby');
+  librariesError.textContent = '';
   try {
     await searchNearbyFlow();
     savePrefs();
   } catch (err) {
     librariesError.textContent = geolocationErrorMessage(err);
-  } finally {
-    clearBusy(nearbyBtn);
+    nearbyStatus.textContent = '';
   }
 });
 
@@ -707,16 +716,42 @@ prefMap.addEventListener('click', (event) => {
   if (chip) selectPref(chip.dataset.pref);
 });
 
-// 位置情報が使えないなら「現在地から探す」は最初から出さない。
+// 探し方（現在地 / 地域）を選んだ状態にする。カードを隠し「戻る」を出す。
+function enterMode(mode) {
+  modeChooser.hidden = true;
+  backToModeBtn.hidden = false;
+  regionPanel.hidden = mode !== 'region';
+  if (mode !== 'nearby') nearbyStatus.textContent = '';
+}
+
+// 2択カードに戻る。直前の検索結果・状態表示は破棄する
+// （別の探し方に切り替える動作なので、前の結果が残っていると紛らわしい）。
+function showChooser() {
+  modeChooser.hidden = false;
+  backToModeBtn.hidden = true;
+  regionPanel.hidden = true;
+  nearbyStatus.textContent = '';
+  librariesError.textContent = '';
+  systemListEl.innerHTML = '';
+  step2.hidden = true;
+}
+
+// 位置情報が使えないなら「現在地から探す」カードは出さない。
 // HTTPSかlocalhostでないと geolocation は動かないため（例: LANのIPで開いた場合）。
-function setupNearbyButton() {
+// その場合は選べる道が「地域」だけなので、1枚カードの無意味な選択を挟まず
+// 地域パネルを直接開く（＝従来の「最初からパネル表示」と同じ挙動）。可否を返す。
+function setupModeChooser() {
   const available = 'geolocation' in navigator && window.isSecureContext;
-  nearbyBtn.hidden = !available;
-  orDivider.hidden = !available;
+  modeNearbyBtn.hidden = !available;
+  if (!available) {
+    modeChooser.hidden = true;
+    regionPanel.hidden = false;
+  }
+  return available;
 }
 
 async function init() {
-  setupNearbyButton();
+  const nearbyAvailable = setupModeChooser();
 
   const [prefectures, genres] = await Promise.all([
     fetchJson('/api/prefectures'),
@@ -735,6 +770,9 @@ async function init() {
     if (prefs.genreId) genreSelect.value = prefs.genreId;
     if (prefs.sort) sortSelect.value = prefs.sort;
     if (prefs.pref) {
+      // 保存済みの都道府県があれば地域モードで開く（戻るリンクも出す）。
+      // 現在地が使えない環境では setupModeChooser が既にパネルを開いている。
+      if (nearbyAvailable) enterMode('region');
       try {
         // 市区町村の選択肢が揃ってからでないと保存済みのcityを選べない
         await selectPref(prefs.pref);

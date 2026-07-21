@@ -35,22 +35,39 @@
     <section class="card" id="step1">
       <h2><span class="step-num">1</span>地域を選んで図書館を探す</h2>
 
-      <!-- 位置情報が使えない環境（非セキュアなURL等）ではJS側で出さないため hidden 始まり -->
-      <button type="button" id="nearbyBtn" class="nearby-btn" hidden>
-        <span aria-hidden="true">📍</span>現在地から近い図書館を探す
-      </button>
-      <p class="nearby-status" id="nearbyStatus" role="status"></p>
-      <div class="or-divider" id="orDivider" hidden><span>または地域から選ぶ</span></div>
-
-      <div id="prefMap" class="pref-map" role="group" aria-label="都道府県を選択"></div>
-
-      <div class="form-row">
-        <label for="city">市区町村</label>
-        <select id="city" disabled>
-          <option value="">まず都道府県を選んでください</option>
-        </select>
+      <!-- 探し方の選択（現在地 / 地域）。最初はこの2択だけを見せる -->
+      <div id="modeChooser" class="mode-chooser">
+        <!-- 位置情報が使えない環境（非セキュアなURL等）ではJS側で出さないため hidden 始まり -->
+        <button type="button" id="modeNearbyBtn" class="mode-card" hidden>
+          <span class="mode-icon" aria-hidden="true">📍</span>
+          <span class="mode-text">
+            <span class="mode-title">現在地から探す</span>
+            <span class="mode-desc">近くの図書館を距離順に表示</span>
+          </span>
+        </button>
+        <button type="button" id="modeRegionBtn" class="mode-card">
+          <span class="mode-icon" aria-hidden="true">🗾</span>
+          <span class="mode-text">
+            <span class="mode-title">地域を選んで探す</span>
+            <span class="mode-desc">都道府県・市区町村から選ぶ</span>
+          </span>
+        </button>
       </div>
-      <button id="searchLibrariesBtn">図書館を探す</button>
+
+      <button type="button" id="backToModeBtn" class="back-link" hidden>← 探し方を選ぶ</button>
+      <p class="nearby-status" id="nearbyStatus" role="status"></p>
+
+      <div id="regionPanel" hidden>
+        <div id="prefMap" class="pref-map" role="group" aria-label="都道府県を選択"></div>
+
+        <div class="form-row">
+          <label for="city">市区町村</label>
+          <select id="city" disabled>
+            <option value="">まず都道府県を選んでください</option>
+          </select>
+        </div>
+        <button id="searchLibrariesBtn">図書館を探す</button>
+      </div>
       <p class="error" id="librariesError" role="alert"></p>
     </section>
 

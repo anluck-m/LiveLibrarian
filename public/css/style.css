@@ -369,16 +369,79 @@ button:disabled:hover {
 }
 
 /* -------------------------------------------------------------
-   現在地から探す
+   探し方の選択（現在地 / 地域）— 大きな選択カード2枚
+   最初はこの2択だけを見せ、選ぶとカードが消えて中身に切り替わる。
    ------------------------------------------------------------- */
-.nearby-btn {
+.mode-chooser {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); /* 広い=2列 / 狭い=1列 */
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.mode-card {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   width: 100%;
-  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  background: var(--surface);   /* 既定 button の primary 塗りを打ち消す */
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+
+.mode-card:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.mode-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.mode-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-title {
   font-weight: 700;
+  font-size: 1rem;
+}
+
+.mode-desc {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+}
+
+/* 「← 探し方を選ぶ」— テキストリンク調（primary の塗りボタンにしない） */
+.back-link {
+  background: none;
+  color: var(--primary);
+  border: none;
+  padding: var(--space-1) 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.back-link:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+.back-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .nearby-status {
@@ -386,24 +449,6 @@ button:disabled:hover {
   color: var(--text-sub);
   font-size: 0.9rem;
   min-height: 1.2em;
-}
-
-/* 「または地域から選ぶ」— 両側に線を引く区切り */
-.or-divider {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-4) 0;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.or-divider::before,
-.or-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border);
 }
 
 /* -------------------------------------------------------------
