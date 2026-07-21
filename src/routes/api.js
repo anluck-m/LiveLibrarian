@@ -19,6 +19,13 @@ const RAKUTEN_THROTTLE_MS = 1100; // 楽天のQPS制限(約1req/s)対策
 
 const NEARBY_LIMIT = 30; // 現在地検索でカーリルに要求する図書館数
 
+// 「評価の高い順」で“妥当な評価数”とみなすレビュー件数の下限。
+// 楽天の sort=reviewAverage は 1〜数件レビューの★5.0本が上位を占めて信頼できないため、
+// 代わりに reviewCount（件数の多い順）で母集団を集めてから★平均で並べ替える。
+const MIN_REVIEW_COUNT = 50;
+const TOP_RATED_SCAN_PAGES = 5; // 母集団として走査する楽天ページ数（最大150冊）
+const TOP_RATED_CACHE_TTL_MS = 60 * 60 * 1000; // レビューの変動は遅いので1時間キャッシュ
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -27,6 +34,56 @@ function sleep(ms) {
 // /cities と /libraries?pref= は同じカーリル呼び出しになるため、両方をここから導出する。
 // 取得中のPromiseごと保持して、同時リクエストで二重に叩かないようにする。
 const prefLibrariesCache = new Map();
+
+// 「評価の高い順」の結果（ジャンル単位）をプロセス内にTTL付きでキャッシュする。
+// 値は { at: 取得時刻, promise: Promise<books[]> }。取得中Promiseごと持つことで
+// 同時リクエストの二重取得を防ぐ。失敗時はエントリを消して次回リトライできるようにする。
+const topRatedCache = new Map();
+
+// レビュー件数の多い順で母集団を集め、下限以上のものを★平均の高い順に並べ替える。
+// 件数は降順で返るので、下限未満の本が出た時点で以降を打ち切れる（無駄な走査をしない）。
+function getTopRated(genreId) {
+  const key = genreId || '__root__';
+  const cached = topRatedCache.get(key);
+  if (cached && Date.now() - cached.at < TOP_RATED_CACHE_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = (async () => {
+    const candidates = [];
+    let reachedFloor = false;
+    for (let p = 1; p <= TOP_RATED_SCAN_PAGES && !reachedFloor; p += 1) {
+      const { items, pageCount } = await fetchBookRanking({ genreId, page: p, sort: 'reviewCount' });
+      for (const book of items) {
+        if (book.reviewCount >= MIN_REVIEW_COUNT) {
+          candidates.push(book);
+        } else {
+          // reviewCount 降順なので、ここから先は全て下限未満。走査を打ち切る。
+          reachedFloor = true;
+          break;
+        }
+      }
+      if (p >= pageCount) break; // 楽天のページ終端
+      if (p < TOP_RATED_SCAN_PAGES && !reachedFloor) await sleep(RAKUTEN_THROTTLE_MS);
+    }
+
+    // ★平均の高い順、同点はレビュー件数の多い順（より信頼できる方を上に）。
+    // reviewAverage は楽天由来で文字列のことがあるため Number で数値化して比較する。
+    candidates.sort(
+      (a, b) =>
+        Number(b.reviewAverage) - Number(a.reviewAverage) ||
+        Number(b.reviewCount) - Number(a.reviewCount)
+    );
+    // 評価順の順位として 1..N を振り直す（元の人気順位ではなく評価順の位置）。
+    return candidates.map((book, i) => ({ ...book, rank: i + 1 }));
+  })().catch((error) => {
+    topRatedCache.delete(key); // 失敗はキャッシュに残さない
+    throw error;
+  });
+
+  topRatedCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
 
 function getPrefLibraries(pref) {
   if (!prefLibrariesCache.has(pref)) {
@@ -222,6 +279,19 @@ router.get('/availability', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(502).json({ error: error.message || '貸出状況の取得に失敗しました。' });
+  }
+});
+
+// 「評価の高い順」の本一覧を返す。レビュー件数の多い本を母集団にし、
+// MIN_REVIEW_COUNT 件以上のものだけを★平均の高い順に並べて返す（貸出状況は含めない）。
+router.get('/ranking/top-rated', async (req, res) => {
+  const { genreId } = req.query;
+  try {
+    const books = await getTopRated(genreId);
+    res.json({ books, minReviewCount: MIN_REVIEW_COUNT, count: books.length });
+  } catch (error) {
+    console.error(error);
+    res.status(502).json({ error: error.message || 'ランキング情報の取得に失敗しました。' });
   }
 });
 
