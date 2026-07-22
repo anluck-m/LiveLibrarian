@@ -3,6 +3,9 @@ import axios from 'axios';
 const CALIL_BASE_URL = 'https://api.calil.jp';
 const POLLING_INTERVAL_MS = 2000;
 const MAX_POLLING_COUNT = 15;
+// 1回のHTTP応答が返るまでの上限（無限待ち防止）。ポーリング全体の設計
+// （MAX_POLLING_COUNT × POLLING_INTERVAL_MS）とは独立した、リクエスト単位の保険。
+const REQUEST_TIMEOUT_MS = 10000;
 
 function getAppKey() {
   const appkey = process.env.CALIL_APPKEY;
@@ -21,6 +24,7 @@ function sleep(ms) {
 // undefinedのパラメータはaxiosが送出しないため、使わない絞り込みは渡さなくてよい。
 export async function searchLibraries({ pref, city, geocode, limit }) {
   const { data } = await axios.get(`${CALIL_BASE_URL}/library`, {
+    timeout: REQUEST_TIMEOUT_MS,
     params: {
       appkey: getAppKey(),
       pref,
@@ -55,7 +59,7 @@ export async function checkBooks({ isbns, systemIds }) {
       params.session = session;
     }
 
-    const { data } = await axios.get(`${CALIL_BASE_URL}/check`, { params });
+    const { data } = await axios.get(`${CALIL_BASE_URL}/check`, { timeout: REQUEST_TIMEOUT_MS, params });
 
     // ポーリングのたびに完了済みの件数が増えていくため、結果は上書きせずマージする
     for (const [isbn, systemStatuses] of Object.entries(data.books || {})) {

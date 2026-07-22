@@ -12,6 +12,7 @@ const sortSelect = document.getElementById('sort');
 const systemListEl = document.getElementById('systemList');
 const step2 = document.getElementById('step2');
 const loading = document.getElementById('loading');
+const loadingMessage = document.getElementById('loadingMessage');
 const rankingListEl = document.getElementById('rankingList');
 const librariesError = document.getElementById('librariesError');
 const rankingError = document.getElementById('rankingError');
@@ -75,6 +76,12 @@ async function fetchJson(url) {
     throw new Error(data.error || `リクエストに失敗しました (${res.status})`);
   }
   return data;
+}
+
+// ローディング中の文言。評価順の初回集計だけ時間がかかる旨を出し分ける。
+const DEFAULT_LOADING_MESSAGE = '取得中です。図書館の蔵書確認には少し時間がかかります…';
+function setLoadingMessage(msg) {
+  if (loadingMessage) loadingMessage.textContent = msg;
 }
 
 /* =============================================================
@@ -443,6 +450,7 @@ async function loadRanking(page) {
   filterBar.hidden = true;
   pagination.hidden = true;
   collectControls.hidden = true;
+  setLoadingMessage(DEFAULT_LOADING_MESSAGE);
   loading.hidden = false;
   rankingError.textContent = '';
   try {
@@ -465,7 +473,10 @@ async function loadRanking(page) {
 }
 
 // 評価順（レビュー件数の多い本の中で★平均が高い順）を取得して表示する。
-// サーバがソート済み全件を返すので、ここでは30件ずつ表示していく（ページ送りではなく「もっと見る」）。
+// サーバがソート済み全件を返すので、表示は30件ずつ伸ばす（ページ送りではなく「もっと見る」）。
+// 貸出状況は母集団（最大150件）を1回でまとめて取得する。カーリルの check は件数に
+// よらず所要時間がほぼ一定なので、全件取得しておけば「貸出可」の絞り込みが表示中だけ
+// でなく母集団全体に効く（＝表示していない順位の本も結果に出せる）。
 async function loadTopRated() {
   if (!currentQuery) return;
   availabilityToken += 1; // 進行中の後追い取得を無効化（別のランキングに切り替わるため）
@@ -477,6 +488,7 @@ async function loadTopRated() {
   filterBar.hidden = true;
   pagination.hidden = true; // 評価順は prev/next ではなく「もっと見る」で伸ばす
   collectControls.hidden = true;
+  setLoadingMessage('評価順を集計中です…（初回は数秒かかることがあります）');
   loading.hidden = false;
   rankingError.textContent = '';
   try {
@@ -485,6 +497,7 @@ async function loadTopRated() {
     ratedShown = 0;
     currentRanking = [];
     loading.hidden = true;
+    setLoadingMessage(DEFAULT_LOADING_MESSAGE);
     filterBar.hidden = false;
 
     if (ratedBooks.length === 0) {
@@ -492,15 +505,17 @@ async function loadTopRated() {
       filterCount.textContent = '';
       return;
     }
-    showMoreRated();
+    showMoreRated();                 // 先頭30件をまず表示
+    loadAvailabilityFor(ratedBooks); // 母集団全件の貸出状況をバックグラウンドで一括取得
   } catch (err) {
     rankingError.textContent = err.message;
     loading.hidden = true;
+    setLoadingMessage(DEFAULT_LOADING_MESSAGE);
   }
 }
 
-// 評価順の続きを30件表示する。追加分を currentRanking に積んで再描画し、
-// 表示中の全件について貸出状況を後追い取得する（カーリルは件数によらず所要一定）。
+// 評価順の続きを30件表示する。貸出状況は loadTopRated で母集団を一括取得済みなので
+// ここでは取得し直さず、currentRanking に積んで再描画するだけ（重複取得を避ける）。
 function showMoreRated() {
   const next = ratedBooks.slice(ratedShown, ratedShown + RATED_PAGE_SIZE);
   ratedShown += next.length;
@@ -515,8 +530,6 @@ function showMoreRated() {
     collectStatus.textContent = ratedBooks.length ? 'これ以上はありません' : '';
     collectControls.hidden = true;
   }
-
-  loadAvailabilityFor(currentRanking);
 }
 
 // 表示中の本について貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）
@@ -534,7 +547,9 @@ async function loadAvailabilityFor(books) {
   try {
     const data = await fetchJson(`/api/availability?${params.toString()}`);
     if (token !== availabilityToken) return; // 別のランキングに切り替わっていたら破棄
-    for (const book of currentRanking) {
+    // 取得を依頼した本（books）に結果を付与する。評価順では books=ratedBooks（母集団全件）
+    // だが、currentRanking の表示分は ratedBooks と同一オブジェクトを参照するため表示にも反映される。
+    for (const book of books) {
       book.availability = data.availability[book.isbn] || [];
     }
     renderRanking();
@@ -585,16 +600,34 @@ function matchesFilter(book, filter) {
 }
 
 function renderRanking() {
-  const filtered = currentRanking.filter((book) => matchesFilter(book, currentFilter));
+  // 評価順で絞り込み中は、表示済み(currentRanking)ではなく母集団(ratedBooks)全体から絞る。
+  // 貸出状況は一括取得済みなので、表示していない順位の本も「貸出可」等に該当すれば出せる。
+  const ratedFilterActive = isRatedMode() && currentFilter !== 'all';
+  const source = ratedFilterActive ? ratedBooks : currentRanking;
+  const filtered = source.filter((book) => matchesFilter(book, currentFilter));
   rankingListEl.innerHTML = filtered.map(renderBookCard).join('');
-  const scope = isRatedMode() ? '表示中' : 'このページ';
-  filterCount.textContent = `${filtered.length} / ${currentRanking.length} 件（${scope}）`;
+
+  let scope;
+  if (!isRatedMode()) scope = 'このページ';
+  else if (ratedFilterActive) scope = '評価順・全件';
+  else scope = '表示中';
+  filterCount.textContent = `${filtered.length} / ${source.length} 件（${scope}）`;
+
   if (filtered.length === 0) {
-    let hint = '';
-    if (isRatedMode() && ratedShown < ratedBooks.length) hint = '「もっと見る」で続きを確認できます。';
-    else if (!isRatedMode() && currentPage < totalPages) hint = '「次のページ →」で続きを確認できます。';
-    const where = isRatedMode() ? '表示中の中に' : 'このページには';
-    rankingListEl.innerHTML = `<p class="empty">${where}条件に合う本がありませんでした。${hint}</p>`;
+    let msg;
+    if (ratedFilterActive) {
+      // 母集団全件で0件。まだ貸出状況が届いていないなら「確認中」、届いて0件なら該当なし。
+      const availabilityLoaded = ratedBooks.some((book) => book.availability);
+      msg = availabilityLoaded
+        ? '評価順の対象の中に条件へ合う本がありませんでした。'
+        : '貸出状況を確認しています…（少し時間がかかります）';
+    } else if (isRatedMode()) {
+      msg = '表示できる本がありませんでした。';
+    } else {
+      const hint = currentPage < totalPages ? '「次のページ →」で続きを確認できます。' : '';
+      msg = `このページには条件に合う本がありませんでした。${hint}`;
+    }
+    rankingListEl.innerHTML = `<p class="empty">${msg}</p>`;
   }
 }
 
@@ -607,7 +640,16 @@ filterBar.addEventListener('click', (e) => {
   );
 
   if (isRatedMode()) {
-    // 評価順は読み込み済みの本をメモリ内で絞り込む（走査はしない）
+    // 評価順は読み込み済みの本をメモリ内で絞り込む（走査はしない）。
+    // 「すべて」は30件ずつの表示に戻し「もっと見る」を復帰、絞り込み中は母集団全件を
+    // 一度に出すのでページングを隠す。
+    if (currentFilter === 'all') {
+      loadMoreBtn.textContent = 'もっと見る';
+      collectStatus.textContent = `${ratedShown} / ${ratedBooks.length} 件`;
+      collectControls.hidden = ratedShown >= ratedBooks.length;
+    } else {
+      collectControls.hidden = true;
+    }
     renderRanking();
   } else if (currentFilter === 'all') {
     // 「すべて」は1ページずつ閲覧するモードに戻す

@@ -26,8 +26,27 @@ const MIN_REVIEW_COUNT = 50;
 const TOP_RATED_SCAN_PAGES = 5; // 母集団として走査する楽天ページ数（最大150冊）
 const TOP_RATED_CACHE_TTL_MS = 60 * 60 * 1000; // レビューの変動は遅いので1時間キャッシュ
 
+// 通常のランキング（sales/reviewCount）1ページ分のキャッシュ有効期間。
+// 同じジャンル×並び順×ページへの重複アクセスで楽天を叩かず、バースト時の429も防ぐ。
+// salesは日単位・reviewCountはさらに安定なので5分は十分保守的。
+const RANKING_CACHE_TTL_MS = 5 * 60 * 1000;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Map・キー・TTL・生成関数を受け取る汎用のTTLキャッシュ。TTL内なら取得中の
+// Promiseごと共有して同時リクエストの二重取得を防ぐ。失敗はキャッシュに残さず
+// 次回リトライできるようにする（prefLibrariesCache と同じ発想を一本化したもの）。
+function cachedByTtl(cache, key, ttlMs, produce) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.promise;
+  const promise = produce().catch((error) => {
+    cache.delete(key);
+    throw error;
+  });
+  cache.set(key, { at: Date.now(), promise });
+  return promise;
 }
 
 // 図書館マスタはほぼ静的なので、都道府県単位でプロセス内にキャッシュする。
@@ -35,21 +54,15 @@ function sleep(ms) {
 // 取得中のPromiseごと保持して、同時リクエストで二重に叩かないようにする。
 const prefLibrariesCache = new Map();
 
-// 「評価の高い順」の結果（ジャンル単位）をプロセス内にTTL付きでキャッシュする。
-// 値は { at: 取得時刻, promise: Promise<books[]> }。取得中Promiseごと持つことで
-// 同時リクエストの二重取得を防ぐ。失敗時はエントリを消して次回リトライできるようにする。
+// 「評価の高い順」の結果（ジャンル単位）を TTL 付きでキャッシュする。
 const topRatedCache = new Map();
+// 通常ランキング（sales/reviewCount）1ページ分のキャッシュ（キー＝並び順×ジャンル×ページ）。
+const rankingCache = new Map();
 
 // レビュー件数の多い順で母集団を集め、下限以上のものを★平均の高い順に並べ替える。
 // 件数は降順で返るので、下限未満の本が出た時点で以降を打ち切れる（無駄な走査をしない）。
 function getTopRated(genreId) {
-  const key = genreId || '__root__';
-  const cached = topRatedCache.get(key);
-  if (cached && Date.now() - cached.at < TOP_RATED_CACHE_TTL_MS) {
-    return cached.promise;
-  }
-
-  const promise = (async () => {
+  return cachedByTtl(topRatedCache, genreId || '__root__', TOP_RATED_CACHE_TTL_MS, async () => {
     const candidates = [];
     let reachedFloor = false;
     for (let p = 1; p <= TOP_RATED_SCAN_PAGES && !reachedFloor; p += 1) {
@@ -76,13 +89,7 @@ function getTopRated(genreId) {
     );
     // 評価順の順位として 1..N を振り直す（元の人気順位ではなく評価順の位置）。
     return candidates.map((book, i) => ({ ...book, rank: i + 1 }));
-  })().catch((error) => {
-    topRatedCache.delete(key); // 失敗はキャッシュに残さない
-    throw error;
   });
-
-  topRatedCache.set(key, { at: Date.now(), promise });
-  return promise;
 }
 
 function getPrefLibraries(pref) {
@@ -242,13 +249,17 @@ router.get('/libraries', async (req, res) => {
 // 貸出状況は含めず楽天のみを問い合わせるため高速。貸出状況は別途 /availability で取得する。
 router.get('/ranking', async (req, res) => {
   const { genreId, page, sort } = req.query;
+  const pageNum = page ? Number(page) : 1;
 
   try {
-    const { items, page: currentPage, pageCount } = await fetchBookRanking({
-      genreId,
-      page: page ? Number(page) : 1,
-      sort,
-    });
+    // 同じ 並び順×ジャンル×ページ は短時間キャッシュを共有し、楽天の呼び出しを減らす。
+    const key = `${sort || 'reviewCount'}:${genreId || '__root__'}:${pageNum}`;
+    const { items, page: currentPage, pageCount } = await cachedByTtl(
+      rankingCache,
+      key,
+      RANKING_CACHE_TTL_MS,
+      () => fetchBookRanking({ genreId, page: pageNum, sort })
+    );
     res.json({ ranking: items, page: currentPage, pageCount });
   } catch (error) {
     console.error(error);

@@ -25,11 +25,40 @@ function getCredentials() {
 // sort='reviewCount'（レビュー数順＝定番人気、図書館で借りやすい）か 'sales'（販売数順＝今の話題作）。
 const ALLOWED_SORTS = new Set(['reviewCount', 'sales']);
 
+const REQUEST_TIMEOUT_MS = 8000; // 応答が詰まったときに無限待ちしないための上限
+const MAX_RETRIES = 2; // 429/一時的な5xx/タイムアウト時の追加リトライ回数
+const RETRY_BACKOFF_MS = 1200; // n回目のリトライ前に RETRY_BACKOFF_MS * n だけ待つ
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 一時的な失敗（レート制限・サーバ側の一時エラー・タイムアウト）だけをリトライ対象にする。
+// 恒久的な失敗（401/400 等）は待っても直らないので即座に投げ返す。
+function isRetriable(error) {
+  if (error.code === 'ECONNABORTED') return true; // axios の timeout
+  const status = error.response?.status;
+  return status === 429 || (typeof status === 'number' && status >= 500);
+}
+
+// 楽天は約1req/sのレート制限があり、バーストすると429を返す。呼び出し元でも間隔を
+// 空けているが、それでも出た429や一時的なエラーは指数バックオフで自動リトライする。
+async function requestWithRetry(config) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await axios.get(RAKUTEN_BOOKS_SEARCH_URL, { timeout: REQUEST_TIMEOUT_MS, ...config });
+    } catch (error) {
+      if (attempt >= MAX_RETRIES || !isRetriable(error)) throw error;
+      await sleep(RETRY_BACKOFF_MS * (attempt + 1));
+    }
+  }
+}
+
 export async function fetchBookRanking({ genreId, page = 1, sort = 'reviewCount' } = {}) {
   const { applicationId, accessKey, allowedSiteUrl } = getCredentials();
   const sortParam = ALLOWED_SORTS.has(sort) ? sort : 'reviewCount';
 
-  const { data } = await axios.get(RAKUTEN_BOOKS_SEARCH_URL, {
+  const { data } = await requestWithRetry({
     headers: {
       Referer: allowedSiteUrl,
       Origin: allowedSiteUrl,
