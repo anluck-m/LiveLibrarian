@@ -27,23 +27,26 @@ const loadMoreBtn = document.getElementById('loadMoreBtn');
 const collectStatus = document.getElementById('collectStatus');
 const themeToggle = document.getElementById('themeToggle');
 
-let currentRanking = [];
 let currentFilter = 'all';
-let currentQuery = null; // ランキング取得時のクエリ（ページ送り・収集で再利用）
-let currentPage = 1;
-let totalPages = 1;
+let currentQuery = null; // ランキング取得時のクエリ（母集団の拡張で再利用）
 
-// 収集モード（蔵書あり/貸出可）の状態
-let collected = []; // これまでに集まった該当本
-let collectNextPage = 1; // 次に走査を始める楽天ページ
-let collectHasMore = false;
-let collectScannedRank = 0; // 確認済みの最終順位
+// ===== 母集団（pool）=====
+// 読み込んだ本をすべてここに持ち、貸出状況も母集団ぶんをまとめて取得しておく。
+// 絞り込み（すべて／蔵書あり／貸出可）は貸出可 ⊆ 蔵書あり ⊆ すべて の包含関係なので、
+// この配列をメモリ内で絞るだけで足りる＝切り替えでサーバへ取りに行かない（即時）。
+// 通常モードは楽天ランキングの上位ページを順に読み込んで育て、評価順モードはサーバから
+// 受け取った★順の全件をそのまま母集団にする。
+let pool = [];
+let poolNextPage = 1; // 次に読み込む楽天ページ（通常モードのみ）
+let poolHasMore = false; // 楽天にまだ続きのページがあるか
+let poolLoading = false; // 母集団を広げている最中か
+let poolToken = 0; // 母集団が入れ替わったあとに古い応答を捨てるためのトークン
 
-// 評価順モード（sort=reviewAverage）の状態。サーバから★平均降順のソート済み全件を
-// 受け取り、フロントで30件ずつ表示する（貸出状況は表示分だけ後追い取得する）。
-let ratedBooks = []; // サーバから受けた★順ソート済みの全件
-let ratedShown = 0; // すでに表示した件数
-const RATED_PAGE_SIZE = 30; // 「もっと見る」1回あたりの表示追加数
+let currentPage = 1; // 「すべて」表示時のページ（母集団の上を30件ずつ動く窓）
+let totalPages = 1; // 楽天のページ総数
+let ratedShown = 0; // 評価順モードで「もっと見る」により表示済みの件数
+const PAGE_SIZE = 30; // 1ページの表示件数（楽天の1ページと同じ）
+const POOL_PREFETCH_PAGES = 5; // 母集団として先読みする楽天ページ数（＝最大150冊）
 
 let availabilityToken = 0; // 後追い貸出状況の取得が古くなった応答を無視するためのトークン
 
@@ -432,7 +435,7 @@ document.getElementById('showRankingBtn').addEventListener('click', () => {
   if (sort === 'reviewAverage') {
     loadTopRated();
   } else {
-    loadRanking(1);
+    loadRanking();
   }
 });
 
@@ -441,12 +444,29 @@ function isRatedMode() {
   return currentQuery?.sort === 'reviewAverage';
 }
 
-async function loadRanking(page) {
-  if (!currentQuery) return;
+// 母集団を空にする。ランキングを新しく表示するときに呼び、進行中の取得も無効化する。
+function resetPool() {
+  poolToken += 1;
+  availabilityToken += 1;
+  pool = [];
+  poolNextPage = 1;
+  poolHasMore = false;
+  poolLoading = false;
+  currentPage = 1;
+  totalPages = 1;
+  ratedShown = 0;
+}
 
-  const params = new URLSearchParams({
-    page: String(page),
-  });
+// 母集団の末尾の順位（「○位まで確認済み」の表示に使う）
+function poolLastRank() {
+  return pool.length ? pool[pool.length - 1].rank : 0;
+}
+
+async function loadRanking() {
+  if (!currentQuery) return;
+  resetPool();
+
+  const params = new URLSearchParams({ page: '1' });
   if (currentQuery.genreId) params.set('genreId', currentQuery.genreId);
   if (currentQuery.sort) params.set('sort', currentQuery.sort);
 
@@ -458,21 +478,69 @@ async function loadRanking(page) {
   loading.hidden = false;
   rankingError.textContent = '';
   try {
-    // ① 楽天ランキングを即座に取得して表示（貸出状況はまだ「確認中」）
+    // ① まず1ページ目だけを取得して即座に表示する（貸出状況はまだ「確認中」）
+    const token = poolToken;
     const data = await fetchJson(`/api/ranking?${params.toString()}`);
-    currentRanking = data.ranking;
+    if (token !== poolToken) return;
+    pool = data.ranking;
     currentPage = data.page;
     totalPages = data.pageCount;
-    renderRanking();
-    renderPagination();
+    poolNextPage = data.page + 1;
+    poolHasMore = data.page < data.pageCount;
     filterBar.hidden = false;
     loading.hidden = true;
+    renderRanking();
 
-    // ② 貸出状況を後追いで取得してバッジを更新
-    loadAvailabilityFor(currentRanking);
+    // ② 表示中の30件の貸出状況をすぐ取得してバッジを更新
+    loadAvailabilityFor(pool);
+
+    // ③ 残りの母集団（既定で5ページ＝150冊）を裏で読み込み、その貸出状況も取得しておく。
+    //    ここまで済ませておくと、絞り込みの切り替えはメモリ内の絞り込みだけで完結する。
+    extendPool(POOL_PREFETCH_PAGES - 1, { quiet: true });
   } catch (err) {
     rankingError.textContent = err.message;
     loading.hidden = true;
+  }
+}
+
+// 母集団を楽天の次ページ群まで広げ、追加分の貸出状況も取得する。
+// quiet=true のときはスピナーを出さない（初回の先読みのように裏で進む場合）。
+async function extendPool(pages, { quiet = false } = {}) {
+  if (!currentQuery || poolLoading || !poolHasMore || isRatedMode() || pages < 1) return;
+
+  const token = poolToken;
+  poolLoading = true;
+  if (!quiet) loading.hidden = false;
+  renderControls();
+
+  const params = new URLSearchParams({
+    startPage: String(poolNextPage),
+    pages: String(pages),
+  });
+  if (currentQuery.genreId) params.set('genreId', currentQuery.genreId);
+  if (currentQuery.sort) params.set('sort', currentQuery.sort);
+
+  try {
+    const data = await fetchJson(`/api/ranking/pages?${params.toString()}`);
+    if (token !== poolToken) return; // 別のランキングに切り替わっていたら破棄
+    pool = pool.concat(data.books);
+    poolNextPage = data.nextPage;
+    poolHasMore = data.hasMore;
+    totalPages = data.totalPages;
+    renderRanking();
+    // 追加分だけ貸出状況を取得する（既存分は取得済み・進行中の後追いもそのまま有効）
+    loadAvailabilityFor(data.books);
+  } catch (err) {
+    if (token !== poolToken) return;
+    // 母集団を広げられなくても、すでに読み込んだ分の表示は残す
+    console.error('ランキングの追加取得に失敗:', err.message);
+    if (!quiet) rankingError.textContent = err.message;
+  } finally {
+    if (token === poolToken) {
+      poolLoading = false;
+      if (!quiet) loading.hidden = true;
+      renderControls();
+    }
   }
 }
 
@@ -483,7 +551,7 @@ async function loadRanking(page) {
 // でなく母集団全体に効く（＝表示していない順位の本も結果に出せる）。
 async function loadTopRated() {
   if (!currentQuery) return;
-  availabilityToken += 1; // 進行中の後追い取得を無効化（別のランキングに切り替わるため）
+  resetPool(); // 進行中の取得を無効化（別のランキングに切り替わるため）
 
   const params = new URLSearchParams();
   if (currentQuery.genreId) params.set('genreId', currentQuery.genreId);
@@ -496,21 +564,23 @@ async function loadTopRated() {
   loading.hidden = false;
   rankingError.textContent = '';
   try {
+    const token = poolToken;
     const data = await fetchJson(`/api/ranking/top-rated?${params.toString()}`);
-    ratedBooks = data.books;
+    if (token !== poolToken) return;
+    pool = data.books; // 評価順の母集団は固定（楽天ページを追加で読むことはない）
     ratedShown = 0;
-    currentRanking = [];
+    poolHasMore = false;
     loading.hidden = true;
     setLoadingMessage(DEFAULT_LOADING_MESSAGE);
     filterBar.hidden = false;
 
-    if (ratedBooks.length === 0) {
+    if (pool.length === 0) {
       rankingListEl.innerHTML = `<p class="empty">レビュー${data.minReviewCount}件以上の本が見つかりませんでした。</p>`;
       filterCount.textContent = '';
       return;
     }
-    showMoreRated();                 // 先頭30件をまず表示
-    loadAvailabilityFor(ratedBooks); // 母集団全件の貸出状況をバックグラウンドで一括取得
+    showMoreRated();          // 先頭30件をまず表示
+    loadAvailabilityFor(pool); // 母集団全件の貸出状況をバックグラウンドで一括取得
   } catch (err) {
     rankingError.textContent = err.message;
     loading.hidden = true;
@@ -518,22 +588,11 @@ async function loadTopRated() {
   }
 }
 
-// 評価順の続きを30件表示する。貸出状況は loadTopRated で母集団を一括取得済みなので
-// ここでは取得し直さず、currentRanking に積んで再描画するだけ（重複取得を避ける）。
+// 評価順の続きを30件表示する。貸出状況は loadTopRated で母集団を一括取得済みなので、
+// ここでは表示件数を伸ばして再描画するだけ（重複取得を避ける）。
 function showMoreRated() {
-  const next = ratedBooks.slice(ratedShown, ratedShown + RATED_PAGE_SIZE);
-  ratedShown += next.length;
-  currentRanking = currentRanking.concat(next);
+  ratedShown = Math.min(ratedShown + PAGE_SIZE, pool.length);
   renderRanking();
-
-  if (ratedShown < ratedBooks.length) {
-    loadMoreBtn.textContent = 'もっと見る';
-    collectStatus.textContent = `${ratedShown} / ${ratedBooks.length} 件`;
-    collectControls.hidden = false;
-  } else {
-    collectStatus.textContent = ratedBooks.length ? 'これ以上はありません' : '';
-    collectControls.hidden = true;
-  }
 }
 
 // 未完了（Running）が残る本だけを、間隔を空けて追加取得する回数と待ち時間。
@@ -542,11 +601,12 @@ function showMoreRated() {
 // 表示を待たせずに（最初のバッジは数秒で）取りこぼしも減らせる（配列長＝最大再取得回数）。
 const AVAIL_RETRY_DELAYS_MS = [2000, 3500, 5500, 8000];
 
-// 表示中の本について貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）。
+// 渡した本の貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）。
 // 未完了分は fetchAvailabilityRound が自動で取り直す。
+// トークンはランキングを切り替えたとき（resetPool）だけ進めるので、母集団を広げながら
+// 複数のバッチを並行して取得しても互いを打ち消さない。
 async function loadAvailabilityFor(books) {
-  const token = ++availabilityToken;
-  await fetchAvailabilityRound(books, token, 0);
+  await fetchAvailabilityRound(books, availabilityToken, 0);
 }
 
 async function fetchAvailabilityRound(books, token, attempt) {
@@ -562,8 +622,8 @@ async function fetchAvailabilityRound(books, token, attempt) {
   try {
     const data = await fetchJson(`/api/availability?${params.toString()}`);
     if (token !== availabilityToken) return; // 別のランキングに切り替わっていたら破棄
-    // 取得を依頼した本（books）に結果を付与する。評価順では books=ratedBooks（母集団全件）
-    // だが、currentRanking の表示分は ratedBooks と同一オブジェクトを参照するため表示にも反映される。
+    // 取得を依頼した本（books）に結果を付与する。books は母集団(pool)と同じオブジェクトを
+    // 指しているので、表示中かどうかに関わらずそのまま絞り込み・表示に反映される。
     for (const book of books) {
       book.availability = data.availability[book.isbn] || [];
     }
@@ -594,27 +654,65 @@ function renderPagination() {
   }
   pageIndicator.textContent = `${currentPage} / ${totalPages} ページ`;
   prevPageBtn.disabled = currentPage <= 1;
-  nextPageBtn.disabled = currentPage >= totalPages;
+  // 次ページがすでに母集団にあれば読み込み中でも移動できる（先読み中に固まらないように）
+  const nextPageLoaded = currentPage * PAGE_SIZE < pool.length;
+  nextPageBtn.disabled = currentPage >= totalPages || (!nextPageLoaded && poolLoading);
   pagination.hidden = false;
 }
 
-prevPageBtn.addEventListener('click', () => {
-  if (currentPage > 1) {
-    loadRanking(currentPage - 1);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-});
+// 表示まわりのボタン（ページ送り／もっと見る・もっと探す）を現在の状態に合わせる
+function renderControls() {
+  pagination.hidden = true;
+  collectControls.hidden = true;
+  loadMoreBtn.hidden = false;
+  loadMoreBtn.disabled = poolLoading;
 
-nextPageBtn.addEventListener('click', () => {
-  if (currentPage < totalPages) {
-    loadRanking(currentPage + 1);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  // 絞り込み中は母集団全体の該当分を一度に出すのでページ送りは使わない。
+  // 通常モードでは「もっと探す」で母集団そのものを広げられる（＝どの絞り込みにも効く）。
+  if (currentFilter !== 'all') {
+    if (isRatedMode()) return; // 評価順の母集団は固定
+    loadMoreBtn.textContent = 'もっと探す';
+    loadMoreBtn.hidden = !poolHasMore;
+    collectStatus.textContent = poolLoading
+      ? 'さらに読み込んでいます…'
+      : poolHasMore
+        ? `${poolLastRank()}位まで確認済み`
+        : 'これ以上はありません';
+    collectControls.hidden = false;
+    return;
   }
-});
 
-// 1冊が指定した絞り込み条件に合致するか（選択中の図書館システムのいずれかが該当すればtrue）
-// 注: src/routes/api.js にも同義の matchesFilter がある（収集モードはサーバ側で判定する）。
-//     判定ロジックを変えるときは両方を揃えること。
+  if (isRatedMode()) {
+    loadMoreBtn.textContent = 'もっと見る';
+    if (ratedShown < pool.length) {
+      collectStatus.textContent = `${ratedShown} / ${pool.length} 件`;
+      collectControls.hidden = false;
+    }
+    return;
+  }
+
+  renderPagination();
+}
+
+// ページを移動する。移動先がまだ母集団に無ければ1ページ分だけ読み込んでから表示する。
+async function goToPage(page) {
+  if (page < 1 || page > totalPages) return;
+  const notLoaded = () => (page - 1) * PAGE_SIZE >= pool.length;
+  if (notLoaded()) {
+    if (poolLoading || !poolHasMore) return;
+    await extendPool(1);
+    if (notLoaded()) return; // 増えなかった（終端・エラー）
+  }
+  currentPage = page;
+  renderRanking();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+prevPageBtn.addEventListener('click', () => goToPage(currentPage - 1));
+nextPageBtn.addEventListener('click', () => goToPage(currentPage + 1));
+
+// 1冊が指定した絞り込み条件に合致するか（選択中の図書館システムのいずれかが該当すればtrue）。
+// 絞り込みの判定はここだけで行う（サーバは絞り込まない）。貸出可 ⊆ 蔵書あり ⊆ すべて。
 function matchesFilter(book, filter) {
   if (filter === 'all') return true;
   if (!book.availability) return false; // 貸出状況が未取得の本は絞り込みに合致しない扱い
@@ -627,40 +725,50 @@ function matchesFilter(book, filter) {
   });
 }
 
+const FILTER_LABELS = { held: '蔵書あり', available: '貸出可' };
+
+// 表示対象になる本を母集団から取り出す。
+// 「すべて」だけがページ／もっと見るで区切った一部分で、絞り込み中は母集団全体が対象。
+// 貸出状況は母集団ぶんを取得済みなので、表示していない順位の本も条件に合えば出せる。
+function visibleBooks() {
+  if (currentFilter !== 'all') return pool;
+  if (isRatedMode()) return pool.slice(0, ratedShown);
+  return pool.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+}
+
 function renderRanking() {
-  // 評価順で絞り込み中は、表示済み(currentRanking)ではなく母集団(ratedBooks)全体から絞る。
-  // 貸出状況は一括取得済みなので、表示していない順位の本も「貸出可」等に該当すれば出せる。
-  const ratedFilterActive = isRatedMode() && currentFilter !== 'all';
-  const source = ratedFilterActive ? ratedBooks : currentRanking;
-  const filtered = source.filter((book) => matchesFilter(book, currentFilter));
+  const source = visibleBooks();
+  const filtered =
+    currentFilter === 'all' ? source : source.filter((book) => matchesFilter(book, currentFilter));
   rankingListEl.innerHTML = filtered.map(renderBookCard).join('');
 
-  let scope;
-  if (!isRatedMode()) scope = 'このページ';
-  else if (ratedFilterActive) scope = '評価順・全件';
-  else scope = '表示中';
-  filterCount.textContent = `${filtered.length} / ${source.length} 件（${scope}）`;
+  if (currentFilter === 'all') {
+    filterCount.textContent = `${filtered.length} / ${source.length} 件（${isRatedMode() ? '表示中' : 'このページ'}）`;
+  } else {
+    const scope = isRatedMode() ? '評価順・全件' : `${poolLastRank()}位までを確認`;
+    filterCount.textContent = `${FILTER_LABELS[currentFilter]} ${filtered.length} 件（${scope}）`;
+  }
 
   if (filtered.length === 0) {
-    let msg;
-    if (ratedFilterActive) {
-      // 母集団全件で0件。まだ貸出状況が届いていない／未完了(Running)が残るなら「確認中」、
-      // すべて確定して0件なら該当なし。
-      const availabilityLoaded = ratedBooks.some((book) => book.availability);
-      const stillChecking = ratedBooks.some((book) =>
-        (book.availability || []).some((a) => a.status === 'Running')
-      );
-      msg = availabilityLoaded && !stillChecking
-        ? '評価順の対象の中に条件へ合う本がありませんでした。'
-        : '貸出状況を確認しています…（少し時間がかかります）';
-    } else if (isRatedMode()) {
-      msg = '表示できる本がありませんでした。';
-    } else {
-      const hint = currentPage < totalPages ? '「次のページ →」で続きを確認できます。' : '';
-      msg = `このページには条件に合う本がありませんでした。${hint}`;
-    }
-    rankingListEl.innerHTML = `<p class="empty">${msg}</p>`;
+    rankingListEl.innerHTML = `<p class="empty">${emptyMessage()}</p>`;
   }
+  renderControls();
+}
+
+// 0件のときの案内文。貸出状況がまだ届いていない／未完了(Running)が残るうちは
+// 「該当なし」と断定せず、確認中であることを伝える。
+function emptyMessage() {
+  if (currentFilter === 'all') return '表示できる本がありませんでした。';
+
+  const stillChecking =
+    poolLoading ||
+    pool.some((book) => !book.availability || book.availability.some((a) => a.status === 'Running'));
+  if (stillChecking) return '貸出状況を確認しています…（少し時間がかかります）';
+
+  const label = FILTER_LABELS[currentFilter];
+  if (isRatedMode()) return `評価順の対象の中に${label}の本がありませんでした。`;
+  const hint = poolHasMore ? '「もっと探す」でさらに順位を下げて探せます。' : '';
+  return `${poolLastRank()}位までに${label}の本がありませんでした。${hint}`;
 }
 
 filterBar.addEventListener('click', (e) => {
@@ -670,95 +778,13 @@ filterBar.addEventListener('click', (e) => {
   [...filterBar.querySelectorAll('.filter-btn')].forEach((b) =>
     b.classList.toggle('active', b === btn)
   );
-
-  if (isRatedMode()) {
-    // 評価順は読み込み済みの本をメモリ内で絞り込む（走査はしない）。
-    // 「すべて」は30件ずつの表示に戻し「もっと見る」を復帰、絞り込み中は母集団全件を
-    // 一度に出すのでページングを隠す。
-    if (currentFilter === 'all') {
-      loadMoreBtn.textContent = 'もっと見る';
-      collectStatus.textContent = `${ratedShown} / ${ratedBooks.length} 件`;
-      collectControls.hidden = ratedShown >= ratedBooks.length;
-    } else {
-      collectControls.hidden = true;
-    }
-    renderRanking();
-  } else if (currentFilter === 'all') {
-    // 「すべて」は1ページずつ閲覧するモードに戻す
-    loadRanking(1);
-  } else {
-    // 絞り込みは複数ページを走査して該当本を収集するモード
-    startCollect();
-  }
+  // 絞り込みは読み込み済みの母集団をその場で絞るだけ（サーバへは取りに行かない＝即時）。
+  renderRanking();
 });
-
-// 収集モードを最初から開始する
-function startCollect() {
-  availabilityToken += 1; // 閲覧モードで進行中の貸出状況取得を無効化
-  loadMoreBtn.textContent = 'もっと探す';
-  collected = [];
-  collectNextPage = 1;
-  collectHasMore = false;
-  collectScannedRank = 0;
-  pagination.hidden = true;
-  loadMore();
-}
-
-// 次のバッチ（最大5ページ分）を走査して該当本を追加収集する
-async function loadMore() {
-  if (!currentQuery) return;
-
-  const params = new URLSearchParams({
-    systemIds: currentQuery.systemIds,
-    systemNames: currentQuery.systemNames,
-    filter: currentFilter,
-    startPage: String(collectNextPage),
-  });
-  if (currentQuery.genreId) params.set('genreId', currentQuery.genreId);
-  if (currentQuery.sort) params.set('sort', currentQuery.sort);
-
-  collectControls.hidden = true;
-  loadMoreBtn.disabled = true;
-  loading.hidden = false;
-  if (collected.length === 0) rankingListEl.innerHTML = '';
-  try {
-    const data = await fetchJson(`/api/ranking/collect?${params.toString()}`);
-    collected = collected.concat(data.books);
-    collectNextPage = data.nextPage;
-    collectHasMore = data.hasMore;
-    collectScannedRank = data.scannedToRank;
-    renderCollected();
-  } catch (err) {
-    rankingError.textContent = err.message;
-  } finally {
-    loading.hidden = true;
-    loadMoreBtn.disabled = false;
-  }
-}
-
-const FILTER_LABELS = { held: '蔵書あり', available: '貸出可' };
-
-function renderCollected() {
-  rankingListEl.innerHTML = collected.map(renderBookCard).join('');
-  const label = FILTER_LABELS[currentFilter] || '';
-  filterCount.textContent = `${label} ${collected.length} 件（${collectScannedRank}位までを確認）`;
-
-  if (collected.length === 0 && !collectHasMore) {
-    rankingListEl.innerHTML = `<p class="empty">${label}の本が見つかりませんでした。</p>`;
-  }
-
-  if (collectHasMore) {
-    collectStatus.textContent = `${collectScannedRank}位まで確認済み`;
-    collectControls.hidden = false;
-  } else {
-    collectStatus.textContent = collected.length > 0 ? 'これ以上はありません' : '';
-    collectControls.hidden = collected.length === 0;
-  }
-}
 
 loadMoreBtn.addEventListener('click', () => {
   if (isRatedMode()) showMoreRated();
-  else loadMore();
+  else extendPool(POOL_PREFETCH_PAGES);
 });
 
 // あらすじ <details> の開閉を記録する（toggleはバブルしないのでキャプチャ段階で拾う）

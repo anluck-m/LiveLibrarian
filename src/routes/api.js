@@ -37,18 +37,16 @@ router.post('/settings', (req, res) => {
 // 大学図書館(UNIV)・専門図書館(SPECIAL)は一般利用者が借りられないことが多いため除外する。
 const PUBLIC_LIBRARY_CATEGORIES = new Set(['LARGE', 'MEDIUM', 'SMALL', 'BM']);
 
-// 絞り込み収集モードで1回のリクエストにつき走査する楽天ページ数の上限。
-// カーリルのcheckは件数に関係なく約30秒かかる（ポーリング上限）ため、ISBNはまとめて1回で問い合わせる。
-// 走査ページを増やすほどカーリルの固定コストを多くの本で按分でき効率的だが、
-// 楽天は約1req/sのレート制限があるため、合計を約40秒に収める5ページを上限とする。
+// /ranking/pages（母集団のまとめ取り）で1回のリクエストにつき返す楽天ページ数の上限。
+// 楽天は約1req/sのレート制限があり、ページごとに間隔を空けて順に取るため、
+// 1回の待ち時間が長くなりすぎない5ページ（＝150冊）を上限とする。
 const MAX_SCAN_PAGES = 5;
 const RAKUTEN_THROTTLE_MS = 1100; // 楽天のQPS制限(約1req/s)対策
 
 const NEARBY_LIMIT = 30; // 現在地検索でカーリルに要求する図書館数
 
-// 対話的な貸出状況表示（/availability）の1回あたりのポーリング上限。全部そろうまで
-// 最大30秒待たずに素早く部分結果を返し、未完了はフロント側が後追いで取り直す（体感短縮）。
-// 収集モード（/ranking/collect）は1回で完結させるため既定の MAX_POLLING_COUNT を使う。
+// 貸出状況（/availability）1回あたりのポーリング上限。全部そろうまで最大30秒待たずに
+// 素早く部分結果を返し、未完了はフロント側が後追いで取り直す（体感短縮）。
 const AVAILABILITY_FIRST_POLLS = 2;
 
 // 「評価の高い順」で“妥当な評価数”とみなすレビュー件数の下限。
@@ -186,24 +184,9 @@ function buildAvailabilityArray(isbn, books, systemIdList, systemNameMap) {
   });
 }
 
-// 1冊分の本に、各図書館システムでの貸出状況を付与する
-function withAvailability(book, books, systemIdList, systemNameMap) {
-  return { ...book, availability: buildAvailabilityArray(book.isbn, books, systemIdList, systemNameMap) };
-}
-
-// 1冊が絞り込み条件に合致するか（選択中の図書館システムのいずれかが該当すればtrue）
-// 注: public/js/app.js にも同義の matchesFilter がある（収集モードはサーバ側、評価順の
-//     メモリ内絞り込みはフロント側で使う）。判定ロジックを変えるときは両方を揃えること。
-function matchesFilter(book, filter) {
-  if (filter === 'all') return true;
-  return book.availability.some((a) => {
-    if (a.status !== 'OK' && a.status !== 'Cache') return false;
-    if (a.branches.length === 0) return false;
-    if (filter === 'held') return true;
-    if (filter === 'available') return a.hasAvailable;
-    return false;
-  });
-}
+// 絞り込み（蔵書あり/貸出可）の判定はサーバでは行わない。フロントが読み込み済みの
+// 母集団に対してメモリ内で絞るため（public/js/app.js の matchesFilter）、サーバは
+// 生のランキングと貸出状況だけを返す。
 
 // クエリのsystemIds/systemNamesからID配列と名前マップを作る
 function parseSystems(systemIds, systemNames) {
@@ -281,7 +264,20 @@ router.get('/libraries', async (req, res) => {
   }
 });
 
-// 楽天ブックスの人気本ランキング1ページ分を返す（閲覧モード・即時表示用）。
+// ランキング1ページ分をキャッシュ経由で取得する。キャッシュ済みだったかどうかも返すので、
+// 複数ページを続けて取るときに「実際に楽天を叩いたときだけ」レート制限用の間隔を空けられる。
+function getRankingPage({ genreId, page, sort }) {
+  const key = `${sort || 'reviewCount'}:${genreId || '__root__'}:${page}`;
+  const hit = rankingCache.get(key);
+  return {
+    cached: Boolean(hit) && Date.now() - hit.at < RANKING_CACHE_TTL_MS,
+    promise: cachedByTtl(rankingCache, key, RANKING_CACHE_TTL_MS, () =>
+      fetchBookRanking({ genreId, page, sort })
+    ),
+  };
+}
+
+// 楽天ブックスの人気本ランキング1ページ分を返す（最初の描画用）。
 // 貸出状況は含めず楽天のみを問い合わせるため高速。貸出状況は別途 /availability で取得する。
 router.get('/ranking', async (req, res) => {
   const { genreId, page, sort } = req.query;
@@ -289,14 +285,53 @@ router.get('/ranking', async (req, res) => {
 
   try {
     // 同じ 並び順×ジャンル×ページ は短時間キャッシュを共有し、楽天の呼び出しを減らす。
-    const key = `${sort || 'reviewCount'}:${genreId || '__root__'}:${pageNum}`;
-    const { items, page: currentPage, pageCount } = await cachedByTtl(
-      rankingCache,
-      key,
-      RANKING_CACHE_TTL_MS,
-      () => fetchBookRanking({ genreId, page: pageNum, sort })
-    );
+    const { items, page: currentPage, pageCount } = await getRankingPage({
+      genreId,
+      page: pageNum,
+      sort,
+    }).promise;
     res.json({ ranking: items, page: currentPage, pageCount });
+  } catch (error) {
+    console.error(error);
+    res.status(502).json({ error: error.message || 'ランキング情報の取得に失敗しました。' });
+  }
+});
+
+// 楽天ランキングを複数ページまとめて返す（フロントが持つ「母集団」を広げるための API）。
+// ここでは絞り込みも貸出状況の問い合わせもしない。どの絞り込みでも同じ母集団を使い回せる
+// ようにするのが目的で、貸出状況はフロントが /availability で後追い取得する。
+// そのため応答は楽天の所要時間だけ（ページ間はレート制限対策で間隔を空ける）。
+router.get('/ranking/pages', async (req, res) => {
+  const { genreId, sort, startPage, pages } = req.query;
+  const start = startPage ? Math.max(1, Number(startPage) || 1) : 1;
+  const count = Math.min(Math.max(1, Number(pages) || MAX_SCAN_PAGES), MAX_SCAN_PAGES);
+
+  try {
+    const books = [];
+    let pageCount = 1;
+    let scannedTo = start - 1;
+    for (let p = start; p < start + count; p += 1) {
+      const { promise, cached } = getRankingPage({ genreId, page: p, sort });
+      const { items, pageCount: pc } = await promise;
+      pageCount = pc;
+      scannedTo = p;
+      books.push(...items);
+      if (p >= pc) break; // 楽天のページ終端に到達
+      // キャッシュから返せた場合は楽天を叩いていないので待つ必要がない
+      if (!cached && p < start + count - 1) await sleep(RAKUTEN_THROTTLE_MS);
+    }
+
+    const nextPage = scannedTo + 1;
+    res.json({
+      books,
+      scannedFrom: start,
+      scannedTo,
+      // 読み込んだ末尾の順位。UIで「○位まで確認済み」と出すために返す。
+      scannedToRank: books.length ? books[books.length - 1].rank : 0,
+      nextPage,
+      hasMore: nextPage <= pageCount,
+      totalPages: pageCount,
+    });
   } catch (error) {
     console.error(error);
     res.status(502).json({ error: error.message || 'ランキング情報の取得に失敗しました。' });
@@ -341,62 +376,6 @@ router.get('/ranking/top-rated', async (req, res) => {
   try {
     const books = await getTopRated(genreId);
     res.json({ books, minReviewCount: MIN_REVIEW_COUNT, count: books.length });
-  } catch (error) {
-    console.error(error);
-    res.status(502).json({ error: error.message || 'ランキング情報の取得に失敗しました。' });
-  }
-});
-
-// 指定した絞り込み条件（蔵書あり/貸出可）に合致する本だけを、複数ページを走査して収集して返す（収集モード）。
-// 1回のリクエストで最大 MAX_SCAN_PAGES ページ分を走査し、該当本と次回の開始ページ(nextPage)を返す。
-// 呼び出し側は nextPage を指定して「もっと探す」で続きを収集できる。
-router.get('/ranking/collect', async (req, res) => {
-  const { systemIds, systemNames, genreId, filter, startPage, sort } = req.query;
-  const { systemIdList, systemNameMap } = parseSystems(systemIds, systemNames);
-  if (systemIdList.length === 0) {
-    return res.status(400).json({ error: 'systemIds（図書館システムID）は必須です。' });
-  }
-  if (!['held', 'available'].includes(filter)) {
-    return res.status(400).json({ error: 'filterは held / available のいずれかを指定してください。' });
-  }
-
-  const start = startPage ? Math.max(1, Number(startPage)) : 1;
-
-  try {
-    // ① 楽天から候補ISBNをまとめて取得（レート制限対策で間隔を空ける）
-    const candidates = [];
-    let pageCount = 1;
-    let scannedTo = start - 1;
-    for (let p = start; p < start + MAX_SCAN_PAGES; p += 1) {
-      const { items, pageCount: pc } = await fetchBookRanking({ genreId, page: p, sort });
-      pageCount = pc;
-      scannedTo = p;
-      candidates.push(...items);
-      if (p >= pc) break; // 楽天のページ終端に到達
-      if (p < start + MAX_SCAN_PAGES - 1) await sleep(RAKUTEN_THROTTLE_MS);
-    }
-
-    // ② 候補ISBNを1回のcheckでまとめて問い合わせ（カーリルは件数によらず所要時間がほぼ一定）
-    const isbns = candidates.map((book) => book.isbn).filter(Boolean);
-    const books = await checkBooks({ isbns, systemIds: systemIdList });
-
-    // ③ 条件に合致する本だけを抽出（順位順を維持）
-    const matched = candidates
-      .map((book) => withAvailability(book, books, systemIdList, systemNameMap))
-      .filter((book) => matchesFilter(book, filter));
-
-    const nextPage = scannedTo + 1;
-    // 確認済みの最終順位（候補の末尾の順位）。UIで「○位まで確認」と表示するために返す。
-    const scannedToRank = candidates.length ? candidates[candidates.length - 1].rank : 0;
-    res.json({
-      books: matched,
-      scannedFrom: start,
-      scannedTo,
-      scannedToRank,
-      nextPage,
-      hasMore: nextPage <= pageCount,
-      totalPages: pageCount,
-    });
   } catch (error) {
     console.error(error);
     res.status(502).json({ error: error.message || 'ランキング情報の取得に失敗しました。' });
