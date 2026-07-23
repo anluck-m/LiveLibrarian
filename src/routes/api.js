@@ -3,18 +3,27 @@ import { searchLibraries, checkBooks } from '../services/calilService.js';
 import { fetchBookRanking } from '../services/rakutenService.js';
 import { PREFECTURES } from '../data/prefectures.js';
 import { GENRES } from '../data/genres.js';
-import { getSettings, saveSettings, isConfigured, SETTING_KEYS } from '../settings.js';
+import { getSettings, saveSettings, isConfigured, SETTING_KEYS, isDesktop } from '../settings.js';
 
 const router = express.Router();
 
-// 現在のAPIキー設定を返す（設定画面の初期表示・未設定バナー用）。configured で4キー揃っているか分かる。
-// Web運用(.env)でも4キーが揃っていれば configured=true になり、バナーは出ない。
+// 現在のAPIキー設定を返す。設定画面（キー入力）はデスクトップ版専用の機能なので、
+// キーの「値」はデスクトップ版のときだけ返す。Web版(.env運用)では値を一切返さず、
+// 未設定バナー判定用の configured のみ返す（無認証GETでのキー漏えいを防ぐ防御境界）。
+// configured は .env で4キーが揃っていれば true になり、バナーは出ない。
 router.get('/settings', (req, res) => {
-  res.json({ settings: getSettings(), configured: isConfigured() });
+  if (!isDesktop()) {
+    return res.json({ desktop: false, configured: isConfigured() });
+  }
+  res.json({ desktop: true, settings: getSettings(), configured: isConfigured() });
 });
 
 // APIキー設定を保存する（デスクトップの設定画面からの送信）。保存後は即座に反映される。
+// Web版では保存を提供しない（無認証の書込み・キー上書きを防ぐ）。
 router.post('/settings', (req, res) => {
+  if (!isDesktop()) {
+    return res.status(404).json({ error: 'この機能はデスクトップ版でのみ利用できます。' });
+  }
   try {
     const saved = saveSettings(req.body || {});
     res.json({ ok: true, configured: SETTING_KEYS.every((k) => saved[k]) });
@@ -175,6 +184,8 @@ function withAvailability(book, books, systemIdList, systemNameMap) {
 }
 
 // 1冊が絞り込み条件に合致するか（選択中の図書館システムのいずれかが該当すればtrue）
+// 注: public/js/app.js にも同義の matchesFilter がある（収集モードはサーバ側、評価順の
+//     メモリ内絞り込みはフロント側で使う）。判定ロジックを変えるときは両方を揃えること。
 function matchesFilter(book, filter) {
   if (filter === 'all') return true;
   return book.availability.some((a) => {

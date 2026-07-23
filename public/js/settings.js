@@ -15,6 +15,13 @@ async function load() {
   try {
     const res = await fetch('/api/settings');
     const data = await res.json();
+    // 設定画面はデスクトップ版専用。Web版(.env運用)ではキー値を返さない・保存もできないため、
+    // 直接開かれた場合は注意を出して保存を無効化する（値は空のまま＝漏えいなし）。
+    if (data.desktop === false) {
+      errorEl.textContent = 'この画面はデスクトップ版専用です。Web版ではサーバの .env でキーを設定してください。';
+      saveBtn.disabled = true;
+      return;
+    }
     for (const key of KEYS) {
       document.getElementById(key).value = data.settings?.[key] || '';
     }

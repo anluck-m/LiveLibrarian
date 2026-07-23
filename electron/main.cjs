@@ -20,6 +20,10 @@ async function ensureServer() {
   // これで、アプリを配っても各自のキーが別々に保存される（B案）。
   process.env.LIBRARIAN_CONFIG_PATH = path.join(app.getPath('userData'), 'settings.json');
 
+  // このプロセスはデスクトップ(Electron)版。設定画面・/api/settings はこのときだけ有効にする。
+  // Web版(node server.js)ではこのフラグが立たないため、キーの入力/保存/読み出しは提供しない。
+  process.env.LIBRARIAN_DESKTOP = '1';
+
   // ESMの server.js を動的に読み込む（CJSからESMを使うにはimport()を使う）。
   const serverUrl = pathToFileURL(path.join(__dirname, '..', 'server.js')).href;
   const { startServer } = await import(serverUrl);

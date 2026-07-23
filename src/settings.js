@@ -62,6 +62,12 @@ export function isConfigured() {
   return SETTING_KEYS.every((k) => s[k]);
 }
 
+// このプロセスがデスクトップ(Electron)版か。electron/main.cjs が起動時に立てる。
+// 設定機能（キー値の返却・保存）はデスクトップ版だけに限定するための判定に使う。
+export function isDesktop() {
+  return process.env.LIBRARIAN_DESKTOP === '1';
+}
+
 // 設定を保存し、即座に process.env にも反映する（保存後すぐ検索が使えるように）。
 export function saveSettings(input) {
   const settings = {};

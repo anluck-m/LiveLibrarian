@@ -586,6 +586,8 @@ nextPageBtn.addEventListener('click', () => {
 });
 
 // 1冊が指定した絞り込み条件に合致するか（選択中の図書館システムのいずれかが該当すればtrue）
+// 注: src/routes/api.js にも同義の matchesFilter がある（収集モードはサーバ側で判定する）。
+//     判定ロジックを変えるときは両方を揃えること。
 function matchesFilter(book, filter) {
   if (filter === 'all') return true;
   if (!book.availability) return false; // 貸出状況が未取得の本は絞り込みに合致しない扱い
@@ -892,14 +894,24 @@ function setupModeChooser() {
   return available;
 }
 
-// APIキーが未設定なら、設定を促すバナーを表示する。
-// デスクトップ版で主に効く。Web運用で .env に4キーが揃っていれば configured=true でバナーは出ない。
+// APIキーの設定状態を見て、設定導線と未設定バナーを出し分ける。
+// 設定画面（キー入力）はデスクトップ版専用。Web版では .env を使うため、
+// ヘッダーの⚙️設定リンクは出さず、未設定時の案内も .env 向けにする。
 async function checkSetup() {
   try {
     const res = await fetch('/api/settings');
     const data = await res.json();
+    // Web版（desktop:false）ではヘッダーの⚙️設定リンクを出さない。
+    if (!data.desktop) document.querySelector('.settings-link')?.remove();
+
     const banner = document.getElementById('setupBanner');
-    if (banner) banner.hidden = Boolean(data.configured);
+    if (banner) {
+      banner.hidden = Boolean(data.configured);
+      // Web版で未設定なら settings.html ではなく .env を案内する（リンク切れ回避）。
+      if (!data.configured && !data.desktop) {
+        banner.textContent = 'APIキーが未設定です。サーバの .env にキーを設定してください。';
+      }
+    }
   } catch {
     // 取得できない場合はバナーを出さない（本来の検索側でエラー表示される）
   }

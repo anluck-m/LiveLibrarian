@@ -99,7 +99,7 @@ npm run electron   # アプリのウィンドウが開く
 | GET | `/api/ranking/top-rated?genreId=` | 評価の高い順（レビュー50件以上の本を★平均降順・1時間キャッシュ） |
 | GET | `/api/availability?isbns=&systemIds=&systemNames=` | 指定ISBN群の貸出状況（後追い反映用） |
 | GET | `/api/ranking/collect?systemIds=&genreId=&filter=&startPage=&sort=` | 条件に合致する本を複数ページ走査して収集 |
-| GET / POST | `/api/settings` | APIキー設定の取得／保存（デスクトップ版の「⚙ 設定」画面用） |
+| GET / POST | `/api/settings` | APIキー設定の取得／保存（**デスクトップ版専用**。Web版ではキー値を返さず・保存も不可＝`configured` のみ返す） |
 
 - `sort` … `reviewCount`（デフォルト・定番人気）/ `sales`（今の話題作）/ `reviewAverage`（評価の高い順）。`reviewAverage` はフロントで `/api/ranking/top-rated` に振り分けられる（楽天の生の評価順は低レビュー数の本が上位を占めるため使わない）
 - `filter` … `available`（貸出可）/ `onloan`（貸出中）/ `held`（蔵書あり）
