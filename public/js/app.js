@@ -78,6 +78,10 @@ async function fetchJson(url) {
   return data;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ローディング中の文言。評価順の初回集計だけ時間がかかる旨を出し分ける。
 const DEFAULT_LOADING_MESSAGE = '取得中です。図書館の蔵書確認には少し時間がかかります…';
 function setLoadingMessage(msg) {
@@ -532,9 +536,20 @@ function showMoreRated() {
   }
 }
 
-// 表示中の本について貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）
+// 未完了（Running）が残る本だけを、間隔を空けて追加取得する回数と待ち時間。
+// カーリルは大量ISBN×複数システムだと30秒のポーリングで終わりきらず一部が Running で
+// 返る。一度照会するとカーリル側にキャッシュが効くので、少し待って取り直すと確定でき、
+// 「確認失敗」に見える取りこぼしを大きく減らせる（配列長＝最大再取得回数）。
+const AVAIL_RETRY_DELAYS_MS = [2500, 4000, 6000];
+
+// 表示中の本について貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）。
+// 未完了分は fetchAvailabilityRound が自動で取り直す。
 async function loadAvailabilityFor(books) {
   const token = ++availabilityToken;
+  await fetchAvailabilityRound(books, token, 0);
+}
+
+async function fetchAvailabilityRound(books, token, attempt) {
   const isbns = books.map((b) => b.isbn).filter(Boolean);
   if (isbns.length === 0) return;
 
@@ -553,6 +568,18 @@ async function loadAvailabilityFor(books) {
       book.availability = data.availability[book.isbn] || [];
     }
     renderRanking();
+
+    // まだ「確認中(Running)」のシステムが残る本だけを対象に、間隔を空けて取り直す。
+    const delay = AVAIL_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return; // 追加取得の上限に到達（残りは時間切れとして「確認中…」のまま）
+    const pending = books.filter((b) =>
+      (b.availability || []).some((a) => a.status === 'Running')
+    );
+    if (pending.length === 0) return;
+
+    await sleep(delay);
+    if (token !== availabilityToken) return;
+    await fetchAvailabilityRound(pending, token, attempt + 1);
   } catch (err) {
     if (token !== availabilityToken) return;
     // 貸出状況だけの失敗ではランキング自体は残す
@@ -618,9 +645,13 @@ function renderRanking() {
   if (filtered.length === 0) {
     let msg;
     if (ratedFilterActive) {
-      // 母集団全件で0件。まだ貸出状況が届いていないなら「確認中」、届いて0件なら該当なし。
+      // 母集団全件で0件。まだ貸出状況が届いていない／未完了(Running)が残るなら「確認中」、
+      // すべて確定して0件なら該当なし。
       const availabilityLoaded = ratedBooks.some((book) => book.availability);
-      msg = availabilityLoaded
+      const stillChecking = ratedBooks.some((book) =>
+        (book.availability || []).some((a) => a.status === 'Running')
+      );
+      msg = availabilityLoaded && !stillChecking
         ? '評価順の対象の中に条件へ合う本がありませんでした。'
         : '貸出状況を確認しています…（少し時間がかかります）';
     } else if (isRatedMode()) {
@@ -786,6 +817,12 @@ function renderDesc(book) {
 function renderSystemAvailability(a) {
   const name = escapeHtml(a.systemName);
 
+  // まだ照会中（Running＝カーリルが時間内に返しきれていない）は失敗ではない。
+  // 「確認中…」を出し、loadAvailabilityFor が後から自動で取り直す。
+  if (a.status === 'Running') {
+    return `<div class="avail-system"><span class="badge checking">${name}: 確認中…</span></div>`;
+  }
+  // OK/Cache/Running 以外（＝Error）は、その図書館システムの照会に失敗したもの。
   if (a.status !== 'OK' && a.status !== 'Cache') {
     return `<div class="avail-system"><span class="badge none">${name}: 確認失敗</span></div>`;
   }

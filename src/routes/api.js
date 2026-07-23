@@ -170,7 +170,10 @@ function buildAvailabilityArray(isbn, books, systemIdList, systemNameMap) {
     return {
       systemId,
       systemName: systemNameMap.get(systemId) || systemId,
-      status: info?.status || 'Error',
+      // カーリルの status は OK / Cache（取得済み）/ Running（照会中）/ Error（照会失敗）。
+      // 結果が未取得なのは「ポーリングを打ち切った＝まだ照会中」なので Running 扱いにする
+      // （Error にすると時間切れが「確認失敗」に化け、フロントの自動再取得の対象からも外れる）。
+      status: info?.status || 'Running',
       reserveUrl: info?.reserveurl || null,
       branches,
       hasAvailable: branches.some((b) => b.status.includes('貸出可')),
