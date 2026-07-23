@@ -3,8 +3,26 @@ import { searchLibraries, checkBooks } from '../services/calilService.js';
 import { fetchBookRanking } from '../services/rakutenService.js';
 import { PREFECTURES } from '../data/prefectures.js';
 import { GENRES } from '../data/genres.js';
+import { getSettings, saveSettings, isConfigured, SETTING_KEYS } from '../settings.js';
 
 const router = express.Router();
+
+// 現在のAPIキー設定を返す（設定画面の初期表示・未設定バナー用）。configured で4キー揃っているか分かる。
+// Web運用(.env)でも4キーが揃っていれば configured=true になり、バナーは出ない。
+router.get('/settings', (req, res) => {
+  res.json({ settings: getSettings(), configured: isConfigured() });
+});
+
+// APIキー設定を保存する（デスクトップの設定画面からの送信）。保存後は即座に反映される。
+router.post('/settings', (req, res) => {
+  try {
+    const saved = saveSettings(req.body || {});
+    res.json({ ok: true, configured: SETTING_KEYS.every((k) => saved[k]) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || '設定の保存に失敗しました。' });
+  }
+});
 
 // カーリルの図書館種別のうち公共図書館（および移動図書館）のみを対象にする。
 // 大学図書館(UNIV)・専門図書館(SPECIAL)は一般利用者が借りられないことが多いため除外する。

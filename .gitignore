@@ -2,3 +2,8 @@ node_modules/
 .env
 解説書.md
 docs/
+
+# 各PCに保存されるAPIキー設定（デスクトップ版の設定画面／node server.js 実行時に生成される）
+librarian-settings.json
+# Electronの配布ビルド出力
+dist/

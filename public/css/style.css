@@ -1005,3 +1005,102 @@ button:disabled:hover {
     height: 104px;
   }
 }
+
+/* =============================================================
+   設定リンク・未設定バナー・設定ページ（デスクトップ版で主に使用）
+   すべてデザイントークンを使い、ライト/ダーク両テーマに追従させる。
+   ============================================================= */
+
+/* ヘッダー左上の「設定」リンク（右上のテーマトグルと衝突しない位置に置く） */
+.settings-link {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--primary);
+  text-decoration: none;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.settings-link:hover {
+  background: var(--surface-2);
+}
+
+/* キー未設定時の案内バナー */
+.setup-banner {
+  background: var(--warn-bg);
+  border: 1px solid var(--border-strong);
+  color: var(--warn-fg);
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-btn);
+  margin-bottom: var(--space-6);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.setup-banner a {
+  color: var(--warn-fg);
+  font-weight: 700;
+}
+
+/* ---- 設定ページ (settings.html) ---- */
+.settings-page .form-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.settings-page .form-row label {
+  width: auto;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.settings-page input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-page h2 {
+  font-size: 1.05rem;
+  margin: 1.4rem 0 0.4rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-intro {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-sub);
+  margin-top: 0;
+}
+
+.help {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.2rem 0 0.6rem;
+  line-height: 1.5;
+}
+
+.settings-page .status {
+  color: var(--success-fg);
+  font-size: 0.9rem;
+  margin-top: 0.6rem;
+}
+
+.settings-page .back-link a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.settings-page .back-link a:hover {
+  text-decoration: underline;
+}

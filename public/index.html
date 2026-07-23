@@ -23,6 +23,7 @@
 </head>
 <body>
   <header>
+    <a class="settings-link" href="settings.html">⚙️ 設定</a>
     <button id="themeToggle" class="theme-toggle" type="button" aria-label="テーマを切り替え">🌙</button>
     <h1 class="brand">
       <span class="brand-mark" aria-hidden="true">📚</span>
@@ -32,6 +33,13 @@
   </header>
 
   <main>
+    <!-- APIキー未設定時の案内（デスクトップ版で主に使用。JS側で configured を見て表示切替） -->
+    <div id="setupBanner" class="setup-banner" hidden>
+      APIキーが未設定です。まず
+      <a href="settings.html">⚙️ 設定</a>
+      でキーを登録してください。
+    </div>
+
     <section class="card" id="step1">
       <h2><span class="step-num">1</span>地域を選んで図書館を探す</h2>
 

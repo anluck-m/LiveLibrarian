@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>設定 - librarian</title>
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Shippori+Mincho:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script>
+  // 描画前にテーマを確定して、ダーク選択時のちらつき（FOUC）を防ぐ（index.html と同じ）。
+  (function () {
+    try {
+      var t = localStorage.getItem('librarian:theme');
+      if (t === 'dark' || t === 'light') {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body class="settings-page">
+  <header>
+    <h1 class="brand">
+      <span class="brand-mark" aria-hidden="true">⚙️</span>
+      <span class="brand-name">設定</span>
+    </h1>
+    <p class="tagline">図書館・楽天のAPIキーを登録します</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <p class="settings-intro">
+        このアプリを使うには、あなた自身の <strong>APIキー（合言葉）</strong> が必要です。
+        下のリンクから無料で取得して、貼り付けてください。値はこのPCの中だけに保存されます。
+      </p>
+
+      <h2>図書館（カーリル）</h2>
+      <p class="help">
+        取得先: <a href="https://calil.jp/doc/api.html" target="_blank" rel="noopener">カーリルAPI 利用登録</a>
+      </p>
+      <div class="form-row">
+        <label for="CALIL_APPKEY">カーリル アプリケーションキー</label>
+        <input type="text" id="CALIL_APPKEY" autocomplete="off" spellcheck="false" placeholder="例: 1a2b3c...">
+      </div>
+
+      <h2>楽天ブックス</h2>
+      <p class="help">
+        取得先: <a href="https://webservice.rakuten.co.jp/" target="_blank" rel="noopener">楽天ウェブサービス</a>
+        （アプリID・アプリケーションシークレットを発行）
+      </p>
+      <div class="form-row">
+        <label for="RAKUTEN_APP_ID">楽天 アプリID (applicationId)</label>
+        <input type="text" id="RAKUTEN_APP_ID" autocomplete="off" spellcheck="false" placeholder="例: 10000000...">
+      </div>
+      <div class="form-row">
+        <label for="RAKUTEN_ACCESS_KEY">楽天 アプリケーションシークレット (accessKey)</label>
+        <input type="text" id="RAKUTEN_ACCESS_KEY" autocomplete="off" spellcheck="false" placeholder="例: xxxxxxxx...">
+      </div>
+      <div class="form-row">
+        <label for="RAKUTEN_ALLOWED_SITE_URL">楽天 許可されたWebサイトURL</label>
+        <input type="text" id="RAKUTEN_ALLOWED_SITE_URL" autocomplete="off" spellcheck="false" placeholder="例: http://localhost">
+      </div>
+      <p class="help">
+        楽天ウェブサービスのアプリ管理画面で「アプリURL／許可されたWebサイト」に登録したURLと
+        <strong>同じ値</strong>を入力してください。分からなければ <code>http://localhost</code> を登録して同じものを入れればOKです。
+      </p>
+
+      <button id="saveBtn">保存する</button>
+      <p class="status" id="status"></p>
+      <p class="error" id="error"></p>
+    </section>
+
+    <p class="back-link"><a href="index.html">← アプリに戻る</a></p>
+  </main>
+
+  <script src="js/settings.js"></script>
+</body>
+</html>

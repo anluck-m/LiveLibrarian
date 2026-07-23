@@ -1,6 +1,6 @@
 # librarian
 
-近くの図書館で借りられる人気本ランキングを表示するWebアプリです。
+近くの図書館で借りられる人気本ランキングを表示するアプリです。**1つのコードベースで Webアプリとしても、デスクトップアプリ（Electron）としても動きます**（`src/` `public/` を共有し、起動口だけが異なります）。
 
 楽天ブックスAPIの人気本ランキングと、カーリルAPIの図書館蔵書・貸出状況を組み合わせて、「今人気の本のうち、あなたの近くの図書館で今すぐ借りられる本」を見つけられます。
 
@@ -73,6 +73,17 @@
 
 4. ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
 
+### デスクトップアプリ（Electron）として動かす
+
+同じフォルダから、デスクトップアプリとしても起動できます。
+
+```bash
+npm run electron   # アプリのウィンドウが開く
+```
+
+- デスクトップ版では、APIキーはアプリ内の「⚙ 設定」画面から各PCに保存します（`%APPDATA%\librarian\settings.json`）。`.env` があればそちらが優先されます。
+- 配布用インストーラ（.exe）の作成やビルドの注意点は [BUILD.md](BUILD.md) を参照してください。
+
 ## APIエンドポイント
 
 サーバは静的フロントエンド（`public/`）と、以下のJSON APIを提供します。
@@ -88,6 +99,7 @@
 | GET | `/api/ranking/top-rated?genreId=` | 評価の高い順（レビュー50件以上の本を★平均降順・1時間キャッシュ） |
 | GET | `/api/availability?isbns=&systemIds=&systemNames=` | 指定ISBN群の貸出状況（後追い反映用） |
 | GET | `/api/ranking/collect?systemIds=&genreId=&filter=&startPage=&sort=` | 条件に合致する本を複数ページ走査して収集 |
+| GET / POST | `/api/settings` | APIキー設定の取得／保存（デスクトップ版の「⚙ 設定」画面用） |
 
 - `sort` … `reviewCount`（デフォルト・定番人気）/ `sales`（今の話題作）/ `reviewAverage`（評価の高い順）。`reviewAverage` はフロントで `/api/ranking/top-rated` に振り分けられる（楽天の生の評価順は低レビュー数の本が上位を占めるため使わない）
 - `filter` … `available`（貸出可）/ `onloan`（貸出中）/ `held`（蔵書あり）

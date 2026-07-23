@@ -892,7 +892,22 @@ function setupModeChooser() {
   return available;
 }
 
+// APIキーが未設定なら、設定を促すバナーを表示する。
+// デスクトップ版で主に効く。Web運用で .env に4キーが揃っていれば configured=true でバナーは出ない。
+async function checkSetup() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    const banner = document.getElementById('setupBanner');
+    if (banner) banner.hidden = Boolean(data.configured);
+  } catch {
+    // 取得できない場合はバナーを出さない（本来の検索側でエラー表示される）
+  }
+}
+
 async function init() {
+  checkSetup();
+
   const nearbyAvailable = setupModeChooser();
 
   const [prefectures, genres] = await Promise.all([
