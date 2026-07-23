@@ -201,7 +201,6 @@ function matchesFilter(book, filter) {
     if (a.branches.length === 0) return false;
     if (filter === 'held') return true;
     if (filter === 'available') return a.hasAvailable;
-    if (filter === 'onloan') return a.branches.some((b) => b.status.includes('貸出中'));
     return false;
   });
 }
@@ -348,7 +347,7 @@ router.get('/ranking/top-rated', async (req, res) => {
   }
 });
 
-// 指定した絞り込み条件（貸出可/貸出中/蔵書あり）に合致する本だけを、複数ページを走査して収集して返す（収集モード）。
+// 指定した絞り込み条件（蔵書あり/貸出可）に合致する本だけを、複数ページを走査して収集して返す（収集モード）。
 // 1回のリクエストで最大 MAX_SCAN_PAGES ページ分を走査し、該当本と次回の開始ページ(nextPage)を返す。
 // 呼び出し側は nextPage を指定して「もっと探す」で続きを収集できる。
 router.get('/ranking/collect', async (req, res) => {
@@ -357,8 +356,8 @@ router.get('/ranking/collect', async (req, res) => {
   if (systemIdList.length === 0) {
     return res.status(400).json({ error: 'systemIds（図書館システムID）は必須です。' });
   }
-  if (!['available', 'onloan', 'held'].includes(filter)) {
-    return res.status(400).json({ error: 'filterは available / onloan / held のいずれかを指定してください。' });
+  if (!['held', 'available'].includes(filter)) {
+    return res.status(400).json({ error: 'filterは held / available のいずれかを指定してください。' });
   }
 
   const start = startPage ? Math.max(1, Number(startPage)) : 1;

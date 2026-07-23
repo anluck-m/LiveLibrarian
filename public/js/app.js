@@ -33,7 +33,7 @@ let currentQuery = null; // ランキング取得時のクエリ（ページ送�
 let currentPage = 1;
 let totalPages = 1;
 
-// 収集モード（貸出可/貸出中/蔵書あり）の状態
+// 収集モード（蔵書あり/貸出可）の状態
 let collected = []; // これまでに集まった該当本
 let collectNextPage = 1; // 次に走査を始める楽天ページ
 let collectHasMore = false;
@@ -623,7 +623,6 @@ function matchesFilter(book, filter) {
     if (a.branches.length === 0) return false;
     if (filter === 'held') return true;
     if (filter === 'available') return a.branches.some((b) => b.status.includes('貸出可'));
-    if (filter === 'onloan') return a.branches.some((b) => b.status.includes('貸出中'));
     return false;
   });
 }
@@ -737,7 +736,7 @@ async function loadMore() {
   }
 }
 
-const FILTER_LABELS = { available: '貸出可', onloan: '貸出中', held: '蔵書あり' };
+const FILTER_LABELS = { held: '蔵書あり', available: '貸出可' };
 
 function renderCollected() {
   rankingListEl.innerHTML = collected.map(renderBookCard).join('');

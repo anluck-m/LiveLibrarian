@@ -102,7 +102,7 @@ npm run electron   # アプリのウィンドウが開く
 | GET / POST | `/api/settings` | APIキー設定の取得／保存（**デスクトップ版専用**。Web版ではキー値を返さず・保存も不可＝`configured` のみ返す） |
 
 - `sort` … `reviewCount`（デフォルト・定番人気）/ `sales`（今の話題作）/ `reviewAverage`（評価の高い順）。`reviewAverage` はフロントで `/api/ranking/top-rated` に振り分けられる（楽天の生の評価順は低レビュー数の本が上位を占めるため使わない）
-- `filter` … `available`（貸出可）/ `onloan`（貸出中）/ `held`（蔵書あり）
+- `filter` … `held`（蔵書あり）/ `available`（貸出可）。左＝広い集合から右＝狭い集合の順（`held` ⊇ `available`）
 
 ## ディレクトリ構成
 
