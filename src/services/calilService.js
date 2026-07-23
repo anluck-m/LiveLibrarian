@@ -38,8 +38,11 @@ export async function searchLibraries({ pref, city, geocode, limit }) {
   return data;
 }
 
-// 指定した図書館システム群について、ISBN群の蔵書・貸出状況を取得する（非同期APIのためポーリングする）
-export async function checkBooks({ isbns, systemIds }) {
+// 指定した図書館システム群について、ISBN群の蔵書・貸出状況を取得する（非同期APIのためポーリングする）。
+// maxPolls で1回の呼び出しのポーリング上限を変えられる。対話的な貸出状況表示は小さめにして
+// 素早く部分結果を返し（残りはフロントが後追いで取り直す）、収集モードは1回で完結させたいので
+// 既定（＝MAX_POLLING_COUNT）のまま最後まで待つ。
+export async function checkBooks({ isbns, systemIds, maxPolls = MAX_POLLING_COUNT }) {
   if (isbns.length === 0 || systemIds.length === 0) {
     return {};
   }
@@ -47,7 +50,7 @@ export async function checkBooks({ isbns, systemIds }) {
   let session;
   const books = {};
 
-  for (let attempt = 0; attempt < MAX_POLLING_COUNT; attempt += 1) {
+  for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     const params = {
       appkey: getAppKey(),
       isbn: isbns.join(','),

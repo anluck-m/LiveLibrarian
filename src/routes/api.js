@@ -46,6 +46,11 @@ const RAKUTEN_THROTTLE_MS = 1100; // 楽天のQPS制限(約1req/s)対策
 
 const NEARBY_LIMIT = 30; // 現在地検索でカーリルに要求する図書館数
 
+// 対話的な貸出状況表示（/availability）の1回あたりのポーリング上限。全部そろうまで
+// 最大30秒待たずに素早く部分結果を返し、未完了はフロント側が後追いで取り直す（体感短縮）。
+// 収集モード（/ranking/collect）は1回で完結させるため既定の MAX_POLLING_COUNT を使う。
+const AVAILABILITY_FIRST_POLLS = 2;
+
 // 「評価の高い順」で“妥当な評価数”とみなすレビュー件数の下限。
 // 楽天の sort=reviewAverage は 1〜数件レビューの★5.0本が上位を占めて信頼できないため、
 // 代わりに reviewCount（件数の多い順）で母集団を集めてから★平均で並べ替える。
@@ -313,7 +318,12 @@ router.get('/availability', async (req, res) => {
   }
 
   try {
-    const books = await checkBooks({ isbns: isbnList, systemIds: systemIdList });
+    // すばやく部分結果を返す（未完了は Running のまま返り、フロントが後追いで取り直す）。
+    const books = await checkBooks({
+      isbns: isbnList,
+      systemIds: systemIdList,
+      maxPolls: AVAILABILITY_FIRST_POLLS,
+    });
     const availability = {};
     for (const isbn of isbnList) {
       availability[isbn] = buildAvailabilityArray(isbn, books, systemIdList, systemNameMap);
