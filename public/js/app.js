@@ -889,15 +889,35 @@ function renderAvailability(book) {
   return book.availability.map(renderSystemAvailability).join('');
 }
 
+// 楽天のサムネイルURLは末尾の `_ex=幅x高さ` で解像度が決まる。既定の 200x200 は
+// カードの大きな表紙には粗いので、表示サイズに合わせて差し替える。元画像がそれより
+// 小さい本は指定しても元のサイズのまま返るため、大きくして困ることはない。
+function coverUrl(imageUrl, size) {
+  if (!imageUrl) return '';
+  return imageUrl.replace(/_ex=\d+x\d+/, `_ex=${size}x${size}`);
+}
+
 function renderBookCard(book) {
   const title = escapeHtml(book.title);
   const itemUrl = escapeHtml(book.itemUrl || '');
   const calilUrl = `https://calil.jp/book/${encodeURIComponent(book.isbn)}`;
+  // 1x/2x を用意して、画面の解像度に応じてブラウザに選ばせる。
+  const cover1x = coverUrl(book.imageUrl, 400);
+  const cover2x = coverUrl(book.imageUrl, 600);
+  // srcset は候補をカンマで区切るため、URLにカンマが含まれる場合は付けない（誤解釈を防ぐ）。
+  // 同じURLしか作れなかったとき（_ex が無いURL）も候補が1つなので付けない。
+  const srcset =
+    cover2x !== cover1x && !`${cover1x}${cover2x}`.includes(',')
+      ? ` srcset="${escapeHtml(cover1x)} 1x, ${escapeHtml(cover2x)} 2x"`
+      : '';
 
   return `
     <article class="book-card">
-      <div class="book-rank">${book.rank}</div>
-      <img class="book-cover" src="${escapeHtml(book.imageUrl || '')}" alt="${title}" onerror="this.style.visibility='hidden'">
+      <div class="book-media">
+        <div class="book-rank">${book.rank}</div>
+        <img class="book-cover" src="${escapeHtml(cover1x)}"${srcset} alt="${title}"
+             loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">
+      </div>
       <div class="book-info">
         <h3><a href="${itemUrl}" target="_blank" rel="noopener">${title}</a></h3>
         <p class="author">${escapeHtml(book.author || '')}</p>
