@@ -4,6 +4,8 @@ node_modules/
 docs/
 
 # 各PCに保存されるAPIキー設定（デスクトップ版の設定画面／node server.js 実行時に生成される）
+livelibrarian-settings.json
+# 旧名(librarian)時代の設定ファイル。手元に残っていても追跡しない
 librarian-settings.json
 # Electronの配布ビルド出力
 dist/

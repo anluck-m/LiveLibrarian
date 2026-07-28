@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>設定 - librarian</title>
+<title>設定 - LiveLibrarian</title>
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +13,7 @@
   // 描画前にテーマを確定して、ダーク選択時のちらつき（FOUC）を防ぐ（index.html と同じ）。
   (function () {
     try {
-      var t = localStorage.getItem('librarian:theme');
+      var t = localStorage.getItem('livelibrarian:theme') || localStorage.getItem('librarian:theme');
       if (t === 'dark' || t === 'light') {
         document.documentElement.setAttribute('data-theme', t);
       }

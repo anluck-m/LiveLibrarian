@@ -10,19 +10,31 @@ const { app, BrowserWindow, shell } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
+// 保存先フォルダ名（%APPDATA%\<アプリ名>）はアプリ名から決まる。
+// 開発起動(electron .)と配布版(electron-builder の productName)で同じ場所になるよう明示する。
+// app.whenReady() より前に呼ばないと userData のパスに反映されない。
+app.setName('LiveLibrarian');
+
 let serverInstance = null;
 let localPort = null;
 
 async function ensureServer() {
   if (serverInstance) return;
   // APIキー設定(settings.json)の保存先を、このユーザー専用のデータ領域に指定する。
-  // 例: C:\Users\<名前>\AppData\Roaming\librarian\settings.json
+  // 例: C:\Users\<名前>\AppData\Roaming\LiveLibrarian\settings.json
   // これで、アプリを配っても各自のキーが別々に保存される（B案）。
-  process.env.LIBRARIAN_CONFIG_PATH = path.join(app.getPath('userData'), 'settings.json');
+  process.env.LIVELIBRARIAN_CONFIG_PATH = path.join(app.getPath('userData'), 'settings.json');
+
+  // 旧名(librarian)時代の保存先。src/settings.js が、新しい方が未作成のときだけ中身を引き継ぐ。
+  process.env.LIVELIBRARIAN_LEGACY_CONFIG_PATH = path.join(
+    app.getPath('appData'),
+    'librarian',
+    'settings.json'
+  );
 
   // このプロセスはデスクトップ(Electron)版。設定画面・/api/settings はこのときだけ有効にする。
   // Web版(node server.js)ではこのフラグが立たないため、キーの入力/保存/読み出しは提供しない。
-  process.env.LIBRARIAN_DESKTOP = '1';
+  process.env.LIVELIBRARIAN_DESKTOP = '1';
 
   // ESMの server.js を動的に読み込む（CJSからESMを使うにはimport()を使う）。
   const serverUrl = pathToFileURL(path.join(__dirname, '..', 'server.js')).href;
@@ -40,7 +52,7 @@ async function createWindow() {
     height: 860,
     minWidth: 360,
     minHeight: 560,
-    title: 'librarian',
+    title: 'LiveLibrarian',
     icon: path.join(__dirname, '..', 'public', 'icons', 'icon-512.png'),
     autoHideMenuBar: true, // 上部のメニューバーを隠してアプリらしく
     webPreferences: {

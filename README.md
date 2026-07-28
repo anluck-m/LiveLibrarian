@@ -1,4 +1,4 @@
-# librarian
+# LiveLibrarian
 
 近くの図書館で借りられる人気本ランキングを表示するアプリです。**1つのコードベースで Webアプリとしても、デスクトップアプリ（Electron）としても動きます**（`src/` `public/` を共有し、起動口だけが異なります）。
 
@@ -82,7 +82,8 @@
 npm run electron   # アプリのウィンドウが開く
 ```
 
-- デスクトップ版では、APIキーはアプリ内の「⚙ 設定」画面から各PCに保存します（`%APPDATA%\librarian\settings.json`）。`.env` があればそちらが優先されます。
+- デスクトップ版では、APIキーはアプリ内の「⚙ 設定」画面から各PCに保存します（`%APPDATA%\LiveLibrarian\settings.json`）。`.env` があればそちらが優先されます。
+- 旧名 `librarian` 時代に保存したAPIキー（`%APPDATA%\librarian\settings.json`）は、新しい保存先が未作成なら初回起動時に自動で引き継ぎます。ブラウザに保存された地域・図書館・テーマの選択も同様に引き継がれるため、入力し直す必要はありません。
 - 配布用インストーラ（.exe）の作成やビルドの注意点は [BUILD.md](BUILD.md) を参照してください。
 
 ## APIエンドポイント
@@ -108,7 +109,7 @@ npm run electron   # アプリのウィンドウが開く
 ## ディレクトリ構成
 
 ```
-librarian/
+livelibrarian/
 ├── server.js               Express サーバのエントリポイント
 ├── docs/
 │   └── design-brief.md     デザインブリーフ（Figma AI 用の UI 仕様書）

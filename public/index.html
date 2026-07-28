@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>librarian - 近くの図書館で借りられる人気本ランキング</title>
+<title>LiveLibrarian - 近くの図書館で借りられる人気本ランキング</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Shippori+Mincho:wght@500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,8 @@
   // 保存がなければ属性を付けず、CSS側の prefers-color-scheme に追従させる。
   (function () {
     try {
-      var t = localStorage.getItem('librarian:theme');
+      // 旧名(librarian)時代のキーも見る。app.js が新しいキーへ移し替えるまでの橋渡し。
+      var t = localStorage.getItem('livelibrarian:theme') || localStorage.getItem('librarian:theme');
       if (t === 'dark' || t === 'light') {
         document.documentElement.setAttribute('data-theme', t);
       }
@@ -27,7 +28,7 @@
     <button id="themeToggle" class="theme-toggle" type="button" aria-label="テーマを切り替え">🌙</button>
     <h1 class="brand">
       <span class="brand-mark" aria-hidden="true">📚</span>
-      <span class="brand-name">librarian<span class="brand-sub">browser</span></span>
+      <span class="brand-name">LiveLibrarian</span>
     </h1>
     <p class="tagline">近くの図書館で借りられる人気本ランキング</p>
   </header>

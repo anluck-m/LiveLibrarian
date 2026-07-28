@@ -1,5 +1,5 @@
 {
-  "name": "librarian",
+  "name": "livelibrarian",
   "version": "1.0.0",
   "description": "カーリルAPI（図書館貸出状況）と楽天ブックスAPI（ランキング）を組み合わせて、近くの図書館で借りられる人気本ランキングを表示するアプリ（Web／デスクトップ両対応）",
   "author": "manaki",
@@ -22,10 +22,10 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.librarian.desktop",
-    "productName": "librarian",
+    "appId": "com.livelibrarian.desktop",
+    "productName": "LiveLibrarian",
     "directories": {
-      "output": "C:/Users/manak/librarian-build"
+      "output": "C:/Users/manak/livelibrarian-build"
     },
     "files": [
       "electron/**",

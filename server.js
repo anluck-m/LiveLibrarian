@@ -30,7 +30,7 @@ export function startServer(port = process.env.PORT || 3000) {
   return new Promise((resolve, reject) => {
     const server = app.listen(port, () => {
       const actualPort = server.address().port;
-      console.log(`librarian server running at http://localhost:${actualPort}`);
+      console.log(`LiveLibrarian server running at http://localhost:${actualPort}`);
       resolve({ server, port: actualPort });
     });
     server.on('error', reject);

@@ -5,8 +5,8 @@ import path from 'node:path';
 // B案（各自が自分のキーを入力する方式）の中核。
 //
 // 保存先:
-//   Electronアプリからは、環境変数 LIBRARIAN_CONFIG_PATH でユーザーデータ領域を指定する
-//   （例: C:\Users\<名前>\AppData\Roaming\librarian\settings.json）。
+//   Electronアプリからは、環境変数 LIVELIBRARIAN_CONFIG_PATH でユーザーデータ領域を指定する
+//   （例: C:\Users\<名前>\AppData\Roaming\LiveLibrarian\settings.json）。
 //   node server.js での単体起動時は、未指定ならカレントディレクトリに置く（開発用）。
 
 // 設定として扱うキー一覧（すべて .env の項目名と一致させている）。
@@ -19,9 +19,32 @@ export const SETTING_KEYS = [
 
 function configPath() {
   return (
-    process.env.LIBRARIAN_CONFIG_PATH ||
+    process.env.LIVELIBRARIAN_CONFIG_PATH ||
+    path.join(process.cwd(), 'livelibrarian-settings.json')
+  );
+}
+
+// 旧名(librarian)時代の保存先。Electron版は保存先フォルダ名がアプリ名から作られるため
+// 改名で別フォルダになる（electron/main.cjs が旧パスを環境変数で渡す）。
+function legacyConfigPath() {
+  return (
+    process.env.LIVELIBRARIAN_LEGACY_CONFIG_PATH ||
     path.join(process.cwd(), 'librarian-settings.json')
   );
+}
+
+// 旧名時代の設定を新しい保存先へ一度だけ引き継ぐ（APIキーの再入力を避ける）。
+// 新しい場所に既にファイルがあれば何もしない＝改名後に入れ直した値を上書きしない。
+function migrateLegacySettings() {
+  try {
+    const current = configPath();
+    const legacy = legacyConfigPath();
+    if (fs.existsSync(current) || !fs.existsSync(legacy)) return;
+    fs.mkdirSync(path.dirname(current), { recursive: true });
+    fs.copyFileSync(legacy, current);
+  } catch {
+    // 引き継ぎに失敗しても起動は続ける（設定画面から入れ直せる）
+  }
 }
 
 // 設定ファイルの中身を返す（無い/壊れている場合は空オブジェクト）。
@@ -38,6 +61,7 @@ export function readSettings() {
 // .env で既に指定済みのキー（dotenv が先に読み込む）は上書きしない＝.env 優先。
 // → Web運用は .env、デスクトップ配布は settings.json、が同じコードで両立する。
 export function loadSettingsIntoEnv() {
+  migrateLegacySettings();
   const settings = readSettings();
   for (const key of SETTING_KEYS) {
     if (settings[key] && !process.env[key]) process.env[key] = settings[key];
@@ -65,7 +89,7 @@ export function isConfigured() {
 // このプロセスがデスクトップ(Electron)版か。electron/main.cjs が起動時に立てる。
 // 設定機能（キー値の返却・保存）はデスクトップ版だけに限定するための判定に使う。
 export function isDesktop() {
-  return process.env.LIBRARIAN_DESKTOP === '1';
+  return process.env.LIVELIBRARIAN_DESKTOP === '1';
 }
 
 // 設定を保存し、即座に process.env にも反映する（保存後すぐ検索が使えるように）。

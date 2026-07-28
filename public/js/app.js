@@ -56,8 +56,26 @@ let selectedPref = ''; // 県名チップで選択中の都道府県。未選択
 // 貸出状況の後追い反映で renderRanking が全再描画するため、開いていたあらすじを再現するのに使う。
 const expandedIsbns = new Set();
 
-const PREFS_KEY = 'librarian:prefs:v1';
-const THEME_KEY = 'librarian:theme';
+const PREFS_KEY = 'livelibrarian:prefs:v1';
+const THEME_KEY = 'livelibrarian:theme';
+
+// 旧名(librarian)時代に保存した値を、新しいキーへ一度だけ引き継ぐ。
+// これを入れないと、改名した瞬間に地域・図書館の選択とテーマが初期状態に戻ってしまう。
+// 新しいキーに既に値があれば触らない（改名後に選び直したものを上書きしないため）。
+const LEGACY_KEYS = {
+  [PREFS_KEY]: 'librarian:prefs:v1',
+  [THEME_KEY]: 'librarian:theme',
+};
+
+try {
+  for (const [key, legacyKey] of Object.entries(LEGACY_KEYS)) {
+    if (localStorage.getItem(key) !== null) continue;
+    const legacyValue = localStorage.getItem(legacyKey);
+    if (legacyValue !== null) localStorage.setItem(key, legacyValue);
+  }
+} catch (e) {
+  /* localStorage不可の環境は無視 */
+}
 
 const DEFAULT_CHECKED_SYSTEMS = 5; // 検索直後に自動でチェックしておく図書館システム数
 const NEARBY_LIMIT = 30; // 現在地検索で取得する図書館数

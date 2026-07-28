@@ -1,9 +1,9 @@
-# librarian デスクトップ版 ビルド手順
+# LiveLibrarian デスクトップ版 ビルド手順
 
-librarian は **1つのプロジェクトで Web版とデスクトップ（Electron）版の両方**に対応しています
+LiveLibrarian は **1つのプロジェクトで Web版とデスクトップ（Electron）版の両方**に対応しています
 （同じ `src/` `public/` を共有し、起動口だけが違う）。このファイルは **デスクトップ版**の
 ビルド／配布手順です。デスクトップ版では、APIキーは各PCで利用者が入力する方式
-（アプリ内の「⚙ 設定」画面 → `%APPDATA%\librarian\settings.json` に保存）を使います。
+（アプリ内の「⚙ 設定」画面 → `%APPDATA%\LiveLibrarian\settings.json` に保存）を使います。
 
 - Web版として動かす: `npm start`（`.env` のキーを使用） → http://localhost:3000
 - デスクトップ版として動かす: `npm run electron`（下記）
@@ -21,7 +21,7 @@ npm run electron     # アプリのウィンドウが開く
 npm run dist
 ```
 
-- 出来上がるもの: `C:\Users\manak\librarian-build\librarian Setup 1.0.0.exe`
+- 出来上がるもの: `C:\Users\manak\livelibrarian-build\LiveLibrarian Setup 1.0.0.exe`
 - 出力先は package.json の `build.directories.output` で **OneDrive の外** に設定しています。
   （OneDrive内に出力するとファイルのリネームに失敗してビルドが失敗するため）
 
@@ -53,6 +53,9 @@ npm run dist
 
 ## 補足
 
-- アプリの中身（画面・裏方サーバー）は Web版 `librarian` とほぼ同じコードです。
+- アプリの中身（画面・裏方サーバー）は Web版 `LiveLibrarian` とほぼ同じコードです。
   ただしこちらは各PCにキーを保存する仕組み（`src/settings.js`、設定画面）が入っています。
-- 設定の保存先: `%APPDATA%\librarian\settings.json`（利用者ごとに別々）。
+- 設定の保存先: `%APPDATA%\LiveLibrarian\settings.json`（利用者ごとに別々）。
+- 旧名 `librarian` で一度インストールしていた場合、保存先フォルダが変わります。旧フォルダ
+  （`%APPDATA%\librarian\settings.json`）にキーが残っていれば初回起動時に自動で引き継ぐため、
+  入力し直す必要はありません。旧バージョンのアンインストールは別途 Windows の設定から行います。
