@@ -111,8 +111,7 @@ npm run electron   # アプリのウィンドウが開く
 ```
 livelibrarian/
 ├── server.js               Express サーバのエントリポイント
-├── docs/
-│   └── design-brief.md     デザインブリーフ（Figma AI 用の UI 仕様書）
+｜
 ├── src/
 │   ├── routes/
 │   │   └── api.js           APIルーティングとロジック
