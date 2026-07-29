@@ -10,6 +10,7 @@ const searchLibrariesBtn = document.getElementById('searchLibrariesBtn');
 const genreSelect = document.getElementById('genre');
 const sortSelect = document.getElementById('sort');
 const systemListEl = document.getElementById('systemList');
+const systemListHint = document.getElementById('systemListHint');
 const step2 = document.getElementById('step2');
 const loading = document.getElementById('loading');
 const loadingMessage = document.getElementById('loadingMessage');
@@ -77,7 +78,6 @@ try {
   /* localStorage不可の環境は無視 */
 }
 
-const DEFAULT_CHECKED_SYSTEMS = 5; // 検索直後に自動でチェックしておく図書館システム数
 const NEARBY_LIMIT = 30; // 現在地検索で取得する図書館数
 
 // HTML特殊文字をエスケープ（APIから来るタイトル・あらすじ等を安全に埋め込む）
@@ -169,6 +169,12 @@ function savePrefs() {
   try {
     const previous = loadPrefs() || {};
     const { systemIds, systemNames } = currentCheckedSystems();
+    // 検索した直後はまだどれも選ばれていない。ここで空を書き込むと前回選んだ図書館が
+    // 消えて次回の復元が効かなくなるので、選択が空のときは保存済みの値を残す。
+    // （全部外したまま「ランキングを表示」を押しても手前で弾かれるためここには来ない）
+    const systems = systemIds.length
+      ? { systemIds, systemNames }
+      : { systemIds: previous.systemIds || [], systemNames: previous.systemNames || [] };
     // 現在地検索では都道府県を選ばない。そのときに空で上書きすると、
     // ふだん地域選択を使っているユーザーの保存済みの地域が消えてしまうので残す。
     const region = selectedPref
@@ -179,10 +185,9 @@ function savePrefs() {
       PREFS_KEY,
       JSON.stringify({
         ...region,
+        ...systems,
         genreId: genreSelect.value,
         sort: sortSelect.value,
-        systemIds,
-        systemNames,
       })
     );
   } catch (e) {
@@ -303,6 +308,9 @@ function systemLabelHtml(s) {
 }
 
 function renderSystemList(systems, { autoSelectIds } = {}) {
+  // 1つだけのときは選ぶ余地がなく確定表示になるので、選択を促す見出しは出さない。
+  systemListHint.hidden = systems.length === 1;
+
   // 図書館システムが1つだけなら選ぶ余地がないので、チェックボックスは出さず
   // 「対象の図書館」として確定表示する。値は hidden の checked input で保持し、
   // 以降の処理（currentCheckedSystems 等）は複数のときと同じ経路を通す。
@@ -318,15 +326,13 @@ function renderSystemList(systems, { autoSelectIds } = {}) {
     return;
   }
 
-  // 復元時：保存済みIDに一致するものをチェック。1つも一致しなければ先頭数件にフォールバック。
-  let savedSet = autoSelectIds && autoSelectIds.length ? new Set(autoSelectIds) : null;
-  if (savedSet && !systems.some((s) => savedSet.has(s.systemId))) {
-    savedSet = null;
-  }
+  // 復元時のみ、保存済みIDに一致するものをチェックする。
+  // 一致がなければ（＝新しく検索したときは）どれもチェックしない。
+  const savedSet = new Set(autoSelectIds || []);
 
   systemListEl.innerHTML = systems
-    .map((s, i) => {
-      const checked = savedSet ? savedSet.has(s.systemId) : i < DEFAULT_CHECKED_SYSTEMS;
+    .map((s) => {
+      const checked = savedSet.has(s.systemId);
       return `
         <label>
           <input type="checkbox" value="${escapeHtml(s.systemId)}" data-name="${escapeHtml(s.systemName)}" ${checked ? 'checked' : ''}>
