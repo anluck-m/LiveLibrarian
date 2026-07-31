@@ -2,9 +2,9 @@ import axios from 'axios';
 
 const CALIL_BASE_URL = 'https://api.calil.jp';
 const POLLING_INTERVAL_MS = 2000;
-const MAX_POLLING_COUNT = 15;
+const DEFAULT_MAX_POLLS = 4;
 // 1回のHTTP応答が返るまでの上限（無限待ち防止）。ポーリング全体の設計
-// （MAX_POLLING_COUNT × POLLING_INTERVAL_MS）とは独立した、リクエスト単位の保険。
+// （maxPolls × POLLING_INTERVAL_MS）とは独立した、リクエスト単位の保険。
 const REQUEST_TIMEOUT_MS = 10000;
 
 function getAppKey() {
@@ -39,16 +39,21 @@ export async function searchLibraries({ pref, city, geocode, limit }) {
 }
 
 // 指定した図書館システム群について、ISBN群の蔵書・貸出状況を取得する（非同期APIのためポーリングする）。
-// maxPolls で1回の呼び出しのポーリング上限を変えられる。対話的な貸出状況表示は小さめにして
-// 素早く部分結果を返し（残りはフロントが後追いで取り直す）、収集モードは1回で完結させたいので
-// 既定（＝MAX_POLLING_COUNT）のまま最後まで待つ。
-export async function checkBooks({ isbns, systemIds, maxPolls = MAX_POLLING_COUNT }) {
+//
+// カーリルの check は「照会が進むほど結果が増えていく」APIで、実測では 1秒あたり1〜2冊の
+// ペースでしか確定しない（＝所要時間はISBN件数にほぼ比例する）。1回のHTTPリクエストで
+// 最後まで待つと数十秒〜数分かかるため、ここでは maxPolls 回だけ進めて部分結果を返し、
+// 続きは呼び出し元が session を渡して再開する。
+//
+// session を引数で受け取り戻り値でも返すのが要点。これを引き継がないと、再開のたびに
+// カーリル側で照会がゼロからやり直しになり、いつまで経っても結果が揃わない。
+export async function checkBooks({ isbns, systemIds, maxPolls = DEFAULT_MAX_POLLS, session }) {
   if (isbns.length === 0 || systemIds.length === 0) {
-    return {};
+    return { books: {}, session: null, done: true };
   }
 
-  let session;
   const books = {};
+  let done = false;
 
   for (let attempt = 0; attempt < maxPolls; attempt += 1) {
     const params = {
@@ -70,12 +75,15 @@ export async function checkBooks({ isbns, systemIds, maxPolls = MAX_POLLING_COUN
     }
 
     if (data.continue === 0) {
+      done = true;
+      session = null; // 完了したセッションは使い回せない
       break;
     }
 
     session = data.session;
-    await sleep(POLLING_INTERVAL_MS);
+    // 最後の周回では待たない。ここで待つと結果に反映されない純粋な待ち時間になる。
+    if (attempt < maxPolls - 1) await sleep(POLLING_INTERVAL_MS);
   }
 
-  return books;
+  return { books, session: session || null, done };
 }

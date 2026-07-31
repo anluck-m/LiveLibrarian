@@ -53,9 +53,10 @@ let availabilityToken = 0; // 後追い貸出状況の取得が古くなった�
 
 let selectedPref = ''; // 県名チップで選択中の都道府県。未選択なら空文字。
 
-// あらすじ（<details>）の展開状態を ISBN 単位で保持する。
-// 貸出状況の後追い反映で renderRanking が全再描画するため、開いていたあらすじを再現するのに使う。
-const expandedIsbns = new Set();
+// 開いている <details> を記憶する。貸出状況の後追い反映で再描画が走っても、
+// あらすじ・館ごとの状況が勝手に閉じないよう、描画時に開閉状態を復元するのに使う。
+// キーは "desc:<isbn>"（あらすじ）と "avail:<isbn>:<systemId>"（館ごとの状況）。
+const expandedDetails = new Set();
 
 const PREFS_KEY = 'livelibrarian:prefs:v1';
 const THEME_KEY = 'livelibrarian:theme';
@@ -471,7 +472,9 @@ function isRatedMode() {
 // 母集団を空にする。ランキングを新しく表示するときに呼び、進行中の取得も無効化する。
 function resetPool() {
   poolToken += 1;
-  availabilityToken += 1;
+  availabilityToken += 1; // 進行中の貸出状況の取得を無効化する（古いワーカーは次のチェックで抜ける）
+  availabilityQueue = [];
+  availabilityInFlight = new Set();
   pool = [];
   poolNextPage = 1;
   poolHasMore = false;
@@ -515,11 +518,11 @@ async function loadRanking() {
     loading.hidden = true;
     renderRanking();
 
-    // ② 表示中の30件の貸出状況をすぐ取得してバッジを更新
-    loadAvailabilityFor(pool);
+    // ② 表示中の30件の貸出状況を最優先で取得してバッジを更新
+    scheduleAvailability();
 
-    // ③ 残りの母集団（既定で5ページ＝150冊）を裏で読み込み、その貸出状況も取得しておく。
-    //    ここまで済ませておくと、絞り込みの切り替えはメモリ内の絞り込みだけで完結する。
+    // ③ 残りの母集団（既定で5ページ＝150冊）を裏で読み込む。その貸出状況もキューの後ろに
+    //    積まれ、表示中のページが埋まったあとに順に確認される。
     extendPool(POOL_PREFETCH_PAGES - 1, { quiet: true });
   } catch (err) {
     rankingError.textContent = err.message;
@@ -552,8 +555,8 @@ async function extendPool(pages, { quiet = false } = {}) {
     poolHasMore = data.hasMore;
     totalPages = data.totalPages;
     renderRanking();
-    // 追加分だけ貸出状況を取得する（既存分は取得済み・進行中の後追いもそのまま有効）
-    loadAvailabilityFor(data.books);
+    // 追加分をキューの後ろに積む（表示中のページの確認を優先させる）
+    scheduleAvailability();
   } catch (err) {
     if (token !== poolToken) return;
     // 母集団を広げられなくても、すでに読み込んだ分の表示は残す
@@ -570,9 +573,10 @@ async function extendPool(pages, { quiet = false } = {}) {
 
 // 評価順（レビュー件数の多い本の中で★平均が高い順）を取得して表示する。
 // サーバがソート済み全件を返すので、表示は30件ずつ伸ばす（ページ送りではなく「もっと見る」）。
-// 貸出状況は母集団（最大150件）を1回でまとめて取得する。カーリルの check は件数に
-// よらず所要時間がほぼ一定なので、全件取得しておけば「貸出可」の絞り込みが表示中だけ
-// でなく母集団全体に効く（＝表示していない順位の本も結果に出せる）。
+// 貸出状況は表示中のぶんから順に、母集団全体ぶんを裏で確認していく（scheduleAvailability）。
+// 全件を確認し終えれば「貸出可」の絞り込みが表示中だけでなく母集団全体に効く
+// （＝表示していない順位の本も結果に出せる）が、カーリルの照会は件数に比例して
+// 時間がかかるため、全部そろうまでには数分かかる。
 async function loadTopRated() {
   if (!currentQuery) return;
   resetPool(); // 進行中の取得を無効化（別のランキングに切り替わるため）
@@ -603,8 +607,7 @@ async function loadTopRated() {
       filterCount.textContent = '';
       return;
     }
-    showMoreRated();          // 先頭30件をまず表示
-    loadAvailabilityFor(pool); // 母集団全件の貸出状況をバックグラウンドで一括取得
+    showMoreRated(); // 先頭30件をまず表示（貸出状況は表示中のぶんから順に確認される）
   } catch (err) {
     rankingError.textContent = err.message;
     loading.hidden = true;
@@ -612,63 +615,197 @@ async function loadTopRated() {
   }
 }
 
-// 評価順の続きを30件表示する。貸出状況は loadTopRated で母集団を一括取得済みなので、
-// ここでは表示件数を伸ばして再描画するだけ（重複取得を避ける）。
+// 評価順の続きを30件表示する。新しく表示された本の貸出状況を優先して確認しに行く。
 function showMoreRated() {
   ratedShown = Math.min(ratedShown + PAGE_SIZE, pool.length);
   renderRanking();
+  scheduleAvailability();
 }
 
-// 未完了（Running）が残る本だけを、間隔を空けて追加取得する回数と待ち時間。
-// サーバは初回を素早く切り上げて部分結果を返すので、まだ照会中の図書館はここで段階的に
-// 埋める。カーリルは一度照会するとキャッシュが効くため、少し待って取り直すと確定でき、
-// 表示を待たせずに（最初のバッジは数秒で）取りこぼしも減らせる（配列長＝最大再取得回数）。
-const AVAIL_RETRY_DELAYS_MS = [2000, 3500, 5500, 8000];
+/* =============================================================
+   貸出状況の取得（チャンク＋優先度つきキュー）
+   ============================================================= */
+// カーリルの check は「照会が進むほど結果が増える」APIで、実測では1秒あたり1〜2冊しか
+// 確定しない＝所要時間はISBN件数にほぼ比例する。そのため母集団150冊をまとめて投げると、
+// いま見ている30冊すら数分待っても埋まらなかった（実測 40秒で9%）。
+// 代わりに30冊ずつのチャンクへ分け、「表示中のページ → 残りの母集団」の順に直列で取得する。
+// 30冊なら実測で15秒前後に全件確定する。
+const AVAILABILITY_CHUNK_SIZE = 30;
+// 1チャンクにかける上限時間。これを超えたら諦めて次のチャンクへ進む
+// （1冊でも重い本があると、そこで全体が止まってしまうのを防ぐ）。
+const AVAILABILITY_CHUNK_BUDGET_MS = 90000;
+// サーバへ問い合わせ直すまでの間隔。サーバ側がポーリングの合間に2秒空けるため、ここは短くてよい。
+const AVAILABILITY_POLL_GAP_MS = 500;
+// 1冊あたりのチャンク投入回数の上限（取りこぼしの取り直しが無限に続かないようにする）。
+const AVAILABILITY_MAX_ATTEMPTS = 3;
 
-// 渡した本の貸出状況を取得し、届いたらバッジを更新する（古い応答は無視）。
-// 未完了分は fetchAvailabilityRound が自動で取り直す。
-// トークンはランキングを切り替えたとき（resetPool）だけ進めるので、母集団を広げながら
-// 複数のバッチを並行して取得しても互いを打ち消さない。
-async function loadAvailabilityFor(books) {
-  await fetchAvailabilityRound(books, availabilityToken, 0);
+let availabilityQueue = []; // 貸出状況がまだ確定していない本（先頭ほど優先）
+let availabilityInFlight = new Set(); // いま取得中のチャンクに含まれる本（二重取得の防止）
+let availabilityWorkerToken = null; // 稼働中のワーカーのトークン（null＝停止中）
+
+// 貸出状況がまだ確定していない本か（未取得、または照会中の図書館が残っている）。
+function needsAvailability(book) {
+  if (!book.isbn) return false;
+  if (!book.availability) return true;
+  return book.availability.some((a) => a.status === 'Running');
 }
 
-async function fetchAvailabilityRound(books, token, attempt) {
-  const isbns = books.map((b) => b.isbn).filter(Boolean);
-  if (isbns.length === 0) return;
+// 母集団のうち、まだ確定していない冊数。
+function uncheckedCount() {
+  return pool.filter(needsAvailability).length;
+}
 
-  const params = new URLSearchParams({
-    isbns: isbns.join(','),
-    systemIds: currentQuery.systemIds,
-    systemNames: currentQuery.systemNames,
+// 未確定の本をキューに積む。front=true なら先頭へ入れ直す（＝表示中のページを最優先）。
+// 既にキューにある本は一度取り除いてから入れ直すので、ページ送りのたびに優先度を付け直せる。
+function enqueueAvailability(books, { front = false } = {}) {
+  const target = books.filter((b) => needsAvailability(b) && !availabilityInFlight.has(b));
+  if (target.length === 0) return;
+
+  const set = new Set(target);
+  availabilityQueue = availabilityQueue.filter((b) => !set.has(b));
+  if (front) availabilityQueue.unshift(...target);
+  else availabilityQueue.push(...target);
+
+  startAvailabilityWorker();
+}
+
+// 表示中の本を最優先にし、残りの母集団を後ろに積む。
+// ページ送り・絞り込みの切替・母集団の拡張のたびに呼ぶことで、見えている本から順に埋まる。
+function scheduleAvailability() {
+  if (!currentQuery) return;
+  enqueueAvailability(visibleBooks(), { front: true });
+  enqueueAvailability(pool);
+}
+
+// キューを消化するワーカーを起動する。母集団ごとに1つだけ動かす（直列に取得する）。
+// resetPool で availabilityToken が進むと、古いワーカーは次のチェックで抜け、
+// トークンが変わったことで新しいワーカーがすぐ起動できる。
+function startAvailabilityWorker() {
+  if (availabilityWorkerToken === availabilityToken) return; // 同じ母集団のワーカーが稼働中
+  const token = availabilityToken;
+  availabilityWorkerToken = token;
+  runAvailabilityQueue(token).catch((err) => {
+    console.error('貸出状況の取得に失敗:', err.message);
+    if (availabilityWorkerToken === token) availabilityWorkerToken = null;
   });
+}
 
-  try {
-    const data = await fetchJson(`/api/availability?${params.toString()}`);
+async function runAvailabilityQueue(token) {
+  for (;;) {
+    if (token !== availabilityToken) return; // 別のランキングに切り替わった（新しいワーカーが担当する）
+    if (availabilityQueue.length === 0) {
+      // キューが空になった時点で同期的に枠を手放す。ここを await のあとにすると、
+      // その隙に入った enqueue が「稼働中」と誤判定され、積んだ本が取り残される。
+      availabilityWorkerToken = null;
+      return;
+    }
+    const chunk = [];
+    while (chunk.length < AVAILABILITY_CHUNK_SIZE && availabilityQueue.length > 0) {
+      const book = availabilityQueue.shift();
+      if (needsAvailability(book)) chunk.push(book); // 待っている間に確定した本は捨てる
+    }
+    if (chunk.length === 0) continue;
+
+    chunk.forEach((b) => availabilityInFlight.add(b));
+    try {
+      await fetchAvailabilityChunk(chunk, token);
+    } finally {
+      chunk.forEach((b) => availabilityInFlight.delete(b));
+    }
+    if (token !== availabilityToken) return;
+    requeueUnresolved(chunk);
+  }
+}
+
+// チャンクが終わっても確定しなかった本を、キューの最後尾へ戻す。
+// カーリルは一度照会した本をキャッシュするため、あとで問い合わせ直せばほぼ即座に確定する
+// （実測: 取りこぼした本を単独で聞き直すと1回のポーリングで Cache が返る）。
+// 何度やっても確定しない本で無限に回らないよう、試行回数で打ち切る。
+function requeueUnresolved(chunk) {
+  const retry = chunk.filter((book) => {
+    if (!needsAvailability(book)) return false;
+    book.availabilityAttempts = (book.availabilityAttempts || 0) + 1;
+    return book.availabilityAttempts < AVAILABILITY_MAX_ATTEMPTS;
+  });
+  if (retry.length > 0) enqueueAvailability(retry);
+}
+
+// 1チャンクぶんの貸出状況を、確定するまで繰り返し取得する。
+// サーバから受け取った session を次のリクエストに渡すのが要点。これを引き継がないと
+// カーリル側の照会が毎回ゼロからやり直しになり、いつまでも結果が揃わない。
+async function fetchAvailabilityChunk(books, token) {
+  const isbns = books.map((b) => b.isbn);
+  const deadline = Date.now() + AVAILABILITY_CHUNK_BUDGET_MS;
+  let session = '';
+
+  for (;;) {
+    const params = new URLSearchParams({
+      isbns: isbns.join(','),
+      systemIds: currentQuery.systemIds,
+      systemNames: currentQuery.systemNames,
+    });
+    if (session) params.set('session', session);
+
+    let data;
+    try {
+      data = await fetchJson(`/api/availability?${params.toString()}`);
+    } catch (err) {
+      // 貸出状況だけの失敗ではランキング自体は残す。このチャンクは諦めて次へ進む。
+      if (token === availabilityToken) console.error('貸出状況の取得に失敗:', err.message);
+      return;
+    }
     if (token !== availabilityToken) return; // 別のランキングに切り替わっていたら破棄
+
     // 取得を依頼した本（books）に結果を付与する。books は母集団(pool)と同じオブジェクトを
     // 指しているので、表示中かどうかに関わらずそのまま絞り込み・表示に反映される。
     for (const book of books) {
-      book.availability = data.availability[book.isbn] || [];
+      mergeAvailability(book, data.availability[book.isbn] || []);
     }
-    renderRanking();
+    applyAvailabilityUpdates(books);
 
-    // まだ「確認中(Running)」のシステムが残る本だけを対象に、間隔を空けて取り直す。
-    const delay = AVAIL_RETRY_DELAYS_MS[attempt];
-    if (delay === undefined) return; // 追加取得の上限に到達（残りは時間切れとして「確認中…」のまま）
-    const pending = books.filter((b) =>
-      (b.availability || []).some((a) => a.status === 'Running')
-    );
-    if (pending.length === 0) return;
-
-    await sleep(delay);
-    if (token !== availabilityToken) return;
-    await fetchAvailabilityRound(pending, token, attempt + 1);
-  } catch (err) {
-    if (token !== availabilityToken) return;
-    // 貸出状況だけの失敗ではランキング自体は残す
-    console.error('貸出状況の取得に失敗:', err.message);
+    if (data.done || !data.session) return; // カーリルの照会が完了した
+    if (Date.now() >= deadline) return; // 時間切れ。残りは「確認中…」のまま次のチャンクへ
+    session = data.session;
+    await sleep(AVAILABILITY_POLL_GAP_MS);
   }
+}
+
+// 届いた結果を本に反映する。すでに確定している図書館システムの結果を、あとから来た
+// 「照会中(Running)」で上書きしないのが要点。サーバはリクエストごとに結果を集め直すため、
+// 前のリクエストで確定した本が次の応答では Running として返ってくることがあり、
+// 素直に代入すると確定済みの貸出状況が消えて「確認中…」に戻ってしまう。
+function mergeAvailability(book, incoming) {
+  const previous = book.availability;
+  if (!previous) {
+    book.availability = incoming;
+    return;
+  }
+  book.availability = incoming.map((next) => {
+    if (next.status !== 'Running') return next;
+    const prev = previous.find((p) => p.systemId === next.systemId);
+    return prev && prev.status !== 'Running' ? prev : next;
+  });
+}
+
+// 届いた貸出状況を画面に反映する。
+// 「すべて」表示中は、カード内の貸出状況の部分だけを差し替える（全再描画すると開いていた
+// <details> が閉じ、表紙画像も読み込み直しになるため）。絞り込み中は該当する本の集合
+// そのものが変わるので、従来どおり全描画する。
+function applyAvailabilityUpdates(books) {
+  if (currentFilter !== 'all') {
+    renderRanking();
+    return;
+  }
+  for (const book of books) {
+    const card = rankingListEl.querySelector(`.book-card[data-isbn="${cssEscape(book.isbn)}"]`);
+    const slot = card?.querySelector('.availability');
+    if (slot) slot.innerHTML = renderAvailability(book);
+  }
+  renderFilterCount();
+}
+
+function cssEscape(value) {
+  return window.CSS && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, '\\$&');
 }
 
 function renderPagination() {
@@ -729,6 +866,7 @@ async function goToPage(page) {
   }
   currentPage = page;
   renderRanking();
+  scheduleAvailability(); // 移動先のページの貸出状況を最優先で確認する
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -766,12 +904,7 @@ function renderRanking() {
     currentFilter === 'all' ? source : source.filter((book) => matchesFilter(book, currentFilter));
   rankingListEl.innerHTML = filtered.map(renderBookCard).join('');
 
-  if (currentFilter === 'all') {
-    filterCount.textContent = `${filtered.length} / ${source.length} 件（${isRatedMode() ? '表示中' : 'このページ'}）`;
-  } else {
-    const scope = isRatedMode() ? '評価順・全件' : `${poolLastRank()}位までを確認`;
-    filterCount.textContent = `${FILTER_LABELS[currentFilter]} ${filtered.length} 件（${scope}）`;
-  }
+  renderFilterCount();
 
   if (filtered.length === 0) {
     rankingListEl.innerHTML = `<p class="empty">${emptyMessage()}</p>`;
@@ -779,15 +912,40 @@ function renderRanking() {
   renderControls();
 }
 
+// 件数表示。貸出状況の確認には母集団の冊数に比例した時間がかかるため、確認が済んでいない
+// うちは進捗を併記する。これを出さないと「貸出可 2 件」が確定値に見えてしまう。
+function renderFilterCount() {
+  const source = visibleBooks();
+  const filtered =
+    currentFilter === 'all' ? source : source.filter((book) => matchesFilter(book, currentFilter));
+  const unchecked = uncheckedCount();
+  const checked = pool.length - unchecked;
+
+  if (currentFilter === 'all') {
+    const where = isRatedMode() ? '表示中' : 'このページ';
+    const progress = unchecked > 0 ? `・貸出状況 ${checked}/${pool.length}冊` : '';
+    filterCount.textContent = `${filtered.length} / ${source.length} 件（${where}${progress}）`;
+    return;
+  }
+
+  const scope =
+    unchecked > 0
+      ? `貸出状況を確認中 ${checked}/${pool.length}冊`
+      : isRatedMode()
+        ? '評価順・全件'
+        : `${poolLastRank()}位までを確認`;
+  filterCount.textContent = `${FILTER_LABELS[currentFilter]} ${filtered.length} 件（${scope}）`;
+}
+
 // 0件のときの案内文。貸出状況がまだ届いていない／未完了(Running)が残るうちは
 // 「該当なし」と断定せず、確認中であることを伝える。
 function emptyMessage() {
   if (currentFilter === 'all') return '表示できる本がありませんでした。';
 
-  const stillChecking =
-    poolLoading ||
-    pool.some((book) => !book.availability || book.availability.some((a) => a.status === 'Running'));
-  if (stillChecking) return '貸出状況を確認しています…（少し時間がかかります）';
+  const unchecked = uncheckedCount();
+  if (poolLoading || unchecked > 0) {
+    return `貸出状況を確認しています…（${pool.length - unchecked}/${pool.length}冊 確認済み）`;
+  }
 
   const label = FILTER_LABELS[currentFilter];
   if (isRatedMode()) return `評価順の対象の中に${label}の本がありませんでした。`;
@@ -804,6 +962,8 @@ filterBar.addEventListener('click', (e) => {
   );
   // 絞り込みは読み込み済みの母集団をその場で絞るだけ（サーバへは取りに行かない＝即時）。
   renderRanking();
+  // ただし絞り込みの判定には母集団全体の貸出状況が要る。未確認のぶんの取得を促す。
+  scheduleAvailability();
 });
 
 loadMoreBtn.addEventListener('click', () => {
@@ -811,16 +971,33 @@ loadMoreBtn.addEventListener('click', () => {
   else extendPool(POOL_PREFETCH_PAGES);
 });
 
-// あらすじ <details> の開閉を記録する（toggleはバブルしないのでキャプチャ段階で拾う）
+// <details>（あらすじ／館ごとの状況）の開閉キー。描画時の復元にも同じ関数を使う。
+function descKey(isbn) {
+  return `desc:${isbn}`;
+}
+
+function availKey(isbn, systemId) {
+  return `avail:${isbn}:${systemId}`;
+}
+
+function detailKey(el) {
+  const { isbn, system } = el.dataset;
+  if (!isbn) return '';
+  if (el.classList.contains('book-desc')) return descKey(isbn);
+  if (el.classList.contains('avail-detail') && system) return availKey(isbn, system);
+  return '';
+}
+
+// <details> の開閉を記録する（toggleはバブルしないのでキャプチャ段階で拾う）
 rankingListEl.addEventListener(
   'toggle',
   (e) => {
     const el = e.target;
-    if (!(el instanceof HTMLElement) || !el.classList.contains('book-desc')) return;
-    const isbn = el.dataset.isbn;
-    if (!isbn) return;
-    if (el.open) expandedIsbns.add(isbn);
-    else expandedIsbns.delete(isbn);
+    if (!(el instanceof HTMLElement)) return;
+    const key = detailKey(el);
+    if (!key) return;
+    if (el.open) expandedDetails.add(key);
+    else expandedDetails.delete(key);
   },
   true
 );
@@ -850,11 +1027,11 @@ function renderMeta(book) {
   return `<p class="book-meta">${segments.join('')}</p>`;
 }
 
-// あらすじ（折りたたみ）。展開状態は expandedIsbns で保持する。
+// あらすじ（折りたたみ）。展開状態は expandedDetails で保持する。
 function renderDesc(book) {
   const caption = (book.caption || '').trim();
   if (!caption) return '';
-  const open = expandedIsbns.has(book.isbn) ? ' open' : '';
+  const open = expandedDetails.has(descKey(book.isbn)) ? ' open' : '';
   return `
     <details class="book-desc" data-isbn="${escapeHtml(book.isbn)}"${open}>
       <summary>あらすじを見る</summary>
@@ -862,12 +1039,13 @@ function renderDesc(book) {
     </details>`;
 }
 
-// 1つの図書館システムの貸出状況（要約バッジ＋館ごとの詳細＋予約リンク）
-function renderSystemAvailability(a) {
+// 1つの図書館システムの貸出状況（要約バッジ＋館ごとの詳細＋予約リンク）。
+// isbn は「館ごとの状況」の開閉状態を本ごとに覚えるために受け取る。
+function renderSystemAvailability(a, isbn) {
   const name = escapeHtml(a.systemName);
 
   // まだ照会中（Running＝カーリルが時間内に返しきれていない）は失敗ではない。
-  // 「確認中…」を出し、loadAvailabilityFor が後から自動で取り直す。
+  // 「確認中…」を出し、fetchAvailabilityChunk が session を引き継いで続きを取りに行く。
   if (a.status === 'Running') {
     return `<div class="avail-system"><span class="badge checking">${name}: 確認中…</span></div>`;
   }
@@ -894,10 +1072,12 @@ function renderSystemAvailability(a) {
     ? `<a class="reserve-link" href="${escapeHtml(a.reserveUrl)}" target="_blank" rel="noopener">予約ページへ</a>`
     : '';
 
+  const open = expandedDetails.has(availKey(isbn, a.systemId)) ? ' open' : '';
+
   return `
     <div class="avail-system">
       <span class="badge ${summaryCls}">${name}: ${summaryLabel}</span>
-      <details class="avail-detail">
+      <details class="avail-detail" data-isbn="${escapeHtml(isbn)}" data-system="${escapeHtml(a.systemId)}"${open}>
         <summary>館ごとの状況（${a.branches.length}館）</summary>
         <ul class="branch-list">${branchRows}</ul>
         ${reserve}
@@ -910,7 +1090,7 @@ function renderAvailability(book) {
     // 貸出状況をまだ取得していない（後追いで反映される）
     return '<span class="badge checking">蔵書を確認中…</span>';
   }
-  return book.availability.map(renderSystemAvailability).join('');
+  return book.availability.map((a) => renderSystemAvailability(a, book.isbn)).join('');
 }
 
 // 楽天のサムネイルURLは末尾の `_ex=幅x高さ` で解像度が決まる。既定の 200x200 は
@@ -936,7 +1116,7 @@ function renderBookCard(book) {
       : '';
 
   return `
-    <article class="book-card">
+    <article class="book-card" data-isbn="${escapeHtml(book.isbn)}">
       <div class="book-media">
         <div class="book-rank">${book.rank}</div>
         <img class="book-cover" src="${escapeHtml(cover1x)}"${srcset} alt="${title}"
@@ -1028,10 +1208,9 @@ async function init() {
 
   const nearbyAvailable = setupModeChooser();
 
-  const [prefectures, genres] = await Promise.all([
-    fetchJson('/api/prefectures'),
-    fetchJson('/api/genres'),
-  ]);
+  // 都道府県は pref-map.js（PREF_REGIONS）が地方への割り当てごと持っているため、
+  // /api/prefectures は取りに行かない（取っても renderPrefMap は使わない＝無駄な往復）。
+  const genres = await fetchJson('/api/genres');
 
   renderPrefMap();
   genreSelect.innerHTML = genres
@@ -1061,4 +1240,8 @@ async function init() {
   }
 }
 
-init();
+// 起動処理が落ちるとジャンルも県も出ない空の画面になるため、必ず理由を画面に出す
+// （catch が無いと未処理のPromise拒否になり、コンソール以外に何も出なかった）。
+init().catch((err) => {
+  librariesError.textContent = `画面の初期化に失敗しました（${err.message}）。ページを再読み込みしてください。`;
+});

@@ -45,9 +45,11 @@ const RAKUTEN_THROTTLE_MS = 1100; // 楽天のQPS制限(約1req/s)対策
 
 const NEARBY_LIMIT = 30; // 現在地検索でカーリルに要求する図書館数
 
-// 貸出状況（/availability）1回あたりのポーリング上限。全部そろうまで最大30秒待たずに
-// 素早く部分結果を返し、未完了はフロント側が後追いで取り直す（体感短縮）。
-const AVAILABILITY_FIRST_POLLS = 2;
+// 貸出状況（/availability）1回あたりのポーリング上限。カーリルの照会は 1秒あたり1〜2冊しか
+// 進まないため、1リクエストで最後まで待つと数分かかる。ここまで進めたら部分結果を返し、
+// フロントが session を持って続きを再開する（＝待たせずに段階的に埋まる）。
+// 4回 ≒ 6秒。ポーリング間隔(2秒)ぶんだけ待つので、増やすほど応答は遅く・確定数は多くなる。
+const AVAILABILITY_POLLS_PER_REQUEST = 4;
 
 // 「評価の高い順」で“妥当な評価数”とみなすレビュー件数の下限。
 // 楽天の sort=reviewAverage は 1〜数件レビューの★5.0本が上位を占めて信頼できないため、
@@ -339,8 +341,10 @@ router.get('/ranking/pages', async (req, res) => {
 });
 
 // 指定したISBN群について、各図書館システムでの貸出状況を返す（後追いで反映するための低速API）。
+// カーリルの照会は一度で終わらないため、途中経過（session）を返してフロントが続きを再開できる。
+// フロントは done が true になるまで、同じ isbns と受け取った session で呼び直す。
 router.get('/availability', async (req, res) => {
-  const { isbns, systemIds, systemNames } = req.query;
+  const { isbns, systemIds, systemNames, session } = req.query;
   const { systemIdList, systemNameMap } = parseSystems(systemIds, systemNames);
   if (systemIdList.length === 0) {
     return res.status(400).json({ error: 'systemIds（図書館システムID）は必須です。' });
@@ -348,21 +352,22 @@ router.get('/availability', async (req, res) => {
 
   const isbnList = (isbns || '').split(',').filter(Boolean);
   if (isbnList.length === 0) {
-    return res.json({ availability: {} });
+    return res.json({ availability: {}, session: null, done: true });
   }
 
   try {
-    // すばやく部分結果を返す（未完了は Running のまま返り、フロントが後追いで取り直す）。
-    const books = await checkBooks({
+    // すばやく部分結果を返す（未完了は Running のまま返り、フロントが session を持って続きを取る）。
+    const { books, session: nextSession, done } = await checkBooks({
       isbns: isbnList,
       systemIds: systemIdList,
-      maxPolls: AVAILABILITY_FIRST_POLLS,
+      maxPolls: AVAILABILITY_POLLS_PER_REQUEST,
+      session: session || undefined,
     });
     const availability = {};
     for (const isbn of isbnList) {
       availability[isbn] = buildAvailabilityArray(isbn, books, systemIdList, systemNameMap);
     }
-    res.json({ availability });
+    res.json({ availability, session: nextSession, done });
   } catch (error) {
     console.error(error);
     res.status(502).json({ error: error.message || '貸出状況の取得に失敗しました。' });
