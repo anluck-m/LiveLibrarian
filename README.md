@@ -112,23 +112,28 @@ npm run electron   # アプリのウィンドウが開く
 
 ```
 livelibrarian/
-├── server.js               Express サーバのエントリポイント
-｜
+├── server.js                    Express アプリの組み立てと起動（Web／Electron 共通）
+├── electron/
+│   └── main.cjs                 デスクトップ版のエントリポイント（窓を開き、内蔵サーバを起動）
 ├── src/
 │   ├── routes/
-│   │   └── api.js           APIルーティングとロジック
+│   │   └── api.js               APIルーティングとロジック
 │   ├── services/
-│   │   ├── rakutenService.js  楽天ブックスAPI 呼び出し
-│   │   └── calilService.js    カーリルAPI 呼び出し（ポーリング）
-│   └── data/
-│       ├── prefectures.js   都道府県データ
-│       └── genres.js        楽天ブックスのジャンル定義
-└── public/                 フロントエンド（HTML / CSS / JS）
+│   │   ├── rakutenService.js    楽天ブックスAPI 呼び出し
+│   │   └── calilService.js      カーリルAPI 呼び出し（ポーリング・session 継続）
+│   ├── data/
+│   │   ├── prefectures.js       都道府県データ
+│   │   └── genres.js            楽天ブックスのジャンル定義
+│   └── settings.js              APIキー設定の読み書き（settings.json / .env 優先）
+└── public/                      フロントエンド（HTML / CSS / JS）
     ├── index.html
+    ├── settings.html            APIキー設定画面（デスクトップ版専用）
     ├── css/style.css
+    ├── icons/                   アプリアイコン（Electron・favicon・ホーム画面用）
     └── js/
-        ├── pref-map.js     都道府県の地方区分データ
-        └── app.js
+        ├── app.js               画面のロジック全般（母集団・絞り込み・貸出状況の取得）
+        ├── pref-map.js          都道府県の地方区分データ
+        └── settings.js          設定画面のロジック
 ```
 
 ## 技術スタック
