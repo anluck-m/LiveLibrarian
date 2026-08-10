@@ -1,6 +1,6 @@
 # LiveLibrarian
 
-近くの図書館で借りられる人気本ランキングを表示するアプリです。**1つのコードベースで Webアプリとしても、デスクトップアプリ（Electron）としても動きます**（`src/` `public/` を共有し、起動口だけが異なります）。
+近くの図書館で借りられる人気本ランキングを表示する **Webアプリ**です（Express サーバ + 静的フロントエンド）。Vercel で公開できます。
 
 楽天ブックスAPIの人気本ランキングと、カーリルAPIの図書館蔵書・貸出状況を組み合わせて、「今人気の本のうち、あなたの近くの図書館で今すぐ借りられる本」を見つけられます。
 
@@ -76,17 +76,32 @@
 
 4. ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
 
-### デスクトップアプリ（Electron）として動かす
+### Vercel へデプロイする
 
-同じフォルダから、デスクトップアプリとしても起動できます。
+`server.js` が Express アプリを default export しているため、Vercel は追加設定なしにこれを
+1つのサーバレス関数として動かします（`vercel.json` は不要）。`public/` は Vercel のCDNが
+直接配信します（Vercel 上では `express.static` は使われません）。
+
+必要な作業は2つです。
+
+1. Vercel プロジェクトの環境変数に、`.env` と同じ4つのキーを登録する
+   （`CALIL_APPKEY` / `RAKUTEN_APP_ID` / `RAKUTEN_ACCESS_KEY` / `RAKUTEN_ALLOWED_SITE_URL`）
+2. 楽天ウェブサービスの管理画面「許可されたWebサイト」に本番URLを登録し、同じ値を
+   `RAKUTEN_ALLOWED_SITE_URL` に入れる。このURLは Referer / Origin としてサーバから
+   楽天へ送られるため、一致していないとランキング取得が弾かれます。
+
+### デスクトップアプリ（Electron）版について
+
+v1.0 まではデスクトップ（Electron）版も同じコードベースから配布していましたが、Web公開に
+専念するため `main` では保守していません。当時のコードは **`v1.0-zemi` タグ**にすべて残っています。
 
 ```bash
-npm run electron   # アプリのウィンドウが開く
+git checkout v1.0-zemi
+npm install
+npm run dist        # 配布用インストーラ(.exe)を再ビルド
 ```
 
-- デスクトップ版では、APIキーはアプリ内の「⚙ 設定」画面から各PCに保存します（`%APPDATA%\LiveLibrarian\settings.json`）。`.env` があればそちらが優先されます。
-- 旧名 `librarian` 時代に保存したAPIキー（`%APPDATA%\librarian\settings.json`）は、新しい保存先が未作成なら初回起動時に自動で引き継ぎます。ブラウザに保存された地域・図書館・テーマの選択も同様に引き継がれるため、入力し直す必要はありません。
-- 配布用インストーラ（.exe）の作成やビルドの注意点は [BUILD.md](BUILD.md) を参照してください。
+ビルドの詳細は [BUILD.md](BUILD.md)（`v1.0-zemi` 時点の内容）を参照してください。
 
 ## APIエンドポイント
 
@@ -107,14 +122,14 @@ npm run electron   # アプリのウィンドウが開く
 
 - `sort` … `reviewCount`（デフォルト・定番人気）/ `sales`（今の話題作）/ `reviewAverage`（評価の高い順）。`reviewAverage` はフロントで `/api/ranking/top-rated` に振り分けられる（楽天の生の評価順は低レビュー数の本が上位を占めるため使わない）
 - 絞り込み（すべて / `held`＝蔵書あり / `available`＝貸出可）はフロント側だけの概念で、APIのパラメータには存在しない。左＝広い集合から右＝狭い集合の順（すべて ⊇ 蔵書あり ⊇ 貸出可）で、切り替えは読み込み済みの母集団をメモリ内で絞るだけ
+- 各GETは `Cache-Control: s-maxage=...` を返し、Vercel のCDNに結果をキャッシュさせる（静的データと図書館マスタは1日、ランキングは5分、評価順は1時間）。`s-maxage` はCDNにだけ効きブラウザには効かないため、配信は速いまま内容は新しく保てる。**公開URLでは、これが楽天のレート制限（約1req/s）を守る実質的な防御でもある**
+- `/api/availability`（毎回変わる・session を含む）と `/api/settings`（認証情報の状態）は `no-store` でキャッシュしない
 
 ## ディレクトリ構成
 
 ```
 livelibrarian/
-├── server.js                    Express アプリの組み立てと起動（Web／Electron 共通）
-├── electron/
-│   └── main.cjs                 デスクトップ版のエントリポイント（窓を開き、内蔵サーバを起動）
+├── server.js                    Express アプリの組み立て。default export が Vercel の関数本体になる
 ├── src/
 │   ├── routes/
 │   │   └── api.js               APIルーティングとロジック
@@ -127,9 +142,9 @@ livelibrarian/
 │   └── settings.js              APIキー設定の読み書き（settings.json / .env 優先）
 └── public/                      フロントエンド（HTML / CSS / JS）
     ├── index.html
-    ├── settings.html            APIキー設定画面（デスクトップ版専用）
+    ├── settings.html            APIキー設定画面（v1.0 のデスクトップ版専用。Web版では自動的に隠される）
     ├── css/style.css
-    ├── icons/                   アプリアイコン（Electron・favicon・ホーム画面用）
+    ├── icons/                   アプリアイコン（favicon・ホーム画面用）
     └── js/
         ├── app.js               画面のロジック全般（母集団・絞り込み・貸出状況の取得）
         ├── pref-map.js          都道府県の地方区分データ

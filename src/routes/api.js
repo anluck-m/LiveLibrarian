@@ -12,6 +12,7 @@ const router = express.Router();
 // 未設定バナー判定用の configured のみ返す（無認証GETでのキー漏えいを防ぐ防御境界）。
 // configured は .env で4キーが揃っていれば true になり、バナーは出ない。
 router.get('/settings', (req, res) => {
+  noCache(res);
   if (!isDesktop()) {
     return res.json({ desktop: false, configured: isConfigured() });
   }
@@ -62,6 +63,34 @@ const TOP_RATED_CACHE_TTL_MS = 60 * 60 * 1000; // レビューの変動は遅い
 // 同じジャンル×並び順×ページへの重複アクセスで楽天を叩かず、バースト時の429も防ぐ。
 // salesは日単位・reviewCountはさらに安定なので5分は十分保守的。
 const RANKING_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// ===== CDN（Vercel）キャッシュ =====
+// s-maxage は共有キャッシュ（CDN）にだけ効き、ブラウザには効かない（max-age=0）。
+// つまり「配信はCDNから速く、ブラウザは毎回最新を取りに来る」を両立できる。
+// stale-while-revalidate を付けると、期限切れ後も古い応答をすぐ返しつつ裏で更新するため、
+// 期限が切れた瞬間に当たったリクエストが遅くならない。
+//
+// 公開URLでは、これが楽天のレート制限（約1req/s）を守る実質的な唯一の防御になる。
+// キャッシュが無いと、クローラ1台が /ranking を叩き続けるだけで枠を使い切られる。
+// なお 4xx/5xx はVercelのキャッシュ対象ステータス外なので、失敗が焼き付くことはない。
+function cache(res, seconds) {
+  res.set(
+    'Cache-Control',
+    `public, max-age=0, s-maxage=${seconds}, stale-while-revalidate=${seconds * 2}`
+  );
+}
+
+// キャッシュさせない。内容が毎回変わるもの（貸出状況）と、
+// 認証情報の状態を返すもの（設定）に使う。
+function noCache(res) {
+  res.set('Cache-Control', 'no-store');
+}
+
+// 都道府県・ジャンル・図書館マスタはほぼ不変なので1日持たせる。
+const CDN_STATIC_S = 24 * 60 * 60;
+// ランキングと評価順は、サーバ内キャッシュ(TTL)と同じ長さに揃える。
+const CDN_RANKING_S = RANKING_CACHE_TTL_MS / 1000;
+const CDN_TOP_RATED_S = TOP_RATED_CACHE_TTL_MS / 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -199,10 +228,12 @@ function parseSystems(systemIds, systemNames) {
 }
 
 router.get('/prefectures', (req, res) => {
+  cache(res, CDN_STATIC_S);
   res.json(PREFECTURES);
 });
 
 router.get('/genres', (req, res) => {
+  cache(res, CDN_STATIC_S);
   res.json(GENRES);
 });
 
@@ -220,6 +251,7 @@ router.get('/cities', async (req, res) => {
     // 並べ替えない。カーリルの応答は読み（ローマ字）順に並んでおり
     // （足立区→あきる野市→昭島市→荒川区…）、JSのlocaleCompare('ja')を使うと
     // 漢字が部首順になってこの読み順が壊れるため。
+    cache(res, CDN_STATIC_S);
     res.json([...new Set(libraries.map((lib) => lib.city).filter(Boolean))]);
   } catch (error) {
     console.error(error);
@@ -259,6 +291,10 @@ router.get('/libraries', async (req, res) => {
       systems = groupBySystem(city ? libraries.filter((lib) => lib.city === city) : libraries);
     }
 
+    // 現在地検索は座標ごとに結果が変わり再利用されないのでキャッシュしない。
+    // 地域検索（pref/city）は図書館マスタそのものなのでCDNに長く持たせる。
+    if (hasGeo) noCache(res);
+    else cache(res, CDN_STATIC_S);
     res.json(systems);
   } catch (error) {
     console.error(error);
@@ -292,6 +328,7 @@ router.get('/ranking', async (req, res) => {
       page: pageNum,
       sort,
     }).promise;
+    cache(res, CDN_RANKING_S);
     res.json({ ranking: items, page: currentPage, pageCount });
   } catch (error) {
     console.error(error);
@@ -324,6 +361,7 @@ router.get('/ranking/pages', async (req, res) => {
     }
 
     const nextPage = scannedTo + 1;
+    cache(res, CDN_RANKING_S);
     res.json({
       books,
       scannedFrom: start,
@@ -344,6 +382,8 @@ router.get('/ranking/pages', async (req, res) => {
 // カーリルの照会は一度で終わらないため、途中経過（session）を返してフロントが続きを再開できる。
 // フロントは done が true になるまで、同じ isbns と受け取った session で呼び直す。
 router.get('/availability', async (req, res) => {
+  // session を含み、内容も毎回変わるのでキャッシュ厳禁。
+  noCache(res);
   const { isbns, systemIds, systemNames, session } = req.query;
   const { systemIdList, systemNameMap } = parseSystems(systemIds, systemNames);
   if (systemIdList.length === 0) {
@@ -380,6 +420,7 @@ router.get('/ranking/top-rated', async (req, res) => {
   const { genreId } = req.query;
   try {
     const books = await getTopRated(genreId);
+    cache(res, CDN_TOP_RATED_S);
     res.json({ books, minReviewCount: MIN_REVIEW_COUNT, count: books.length });
   } catch (error) {
     console.error(error);
